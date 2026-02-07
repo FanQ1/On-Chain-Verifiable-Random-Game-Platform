@@ -11,7 +11,7 @@ import "./interfaces/IGameToken.sol";
  */
 contract GameToken is ERC20, Ownable, IGameToken {
     uint256 public constant MAX_SUPPLY = 100_000_000 * 10**18; // 100 million tokens
-    uint256 public constant MINT_FEE = 0.01 ether; // Fee to mint tokens
+    uint256 public MINT_FEE = 0.01 ether; // Fee to mint tokens
 
     event TokensMinted(address indexed to, uint256 amount);
     event TokensBurned(address indexed from, uint256 amount);

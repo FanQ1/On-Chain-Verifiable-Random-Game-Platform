@@ -20,8 +20,8 @@ contract DiceGame is Ownable, ReentrancyGuard {
     uint32 internal constant numWords = 1;
 
     // Game constants
-    uint256 public constant MIN_BET = 0.001 ether;
-    uint256 public constant MAX_BET = 10 ether;
+    uint256 public MIN_BET = 0.001 ether;
+    uint256 public MAX_BET = 10 ether;
     uint256 public constant HOUSE_EDGE = 3; // 3%
     uint256 public constant DICE_SIDES = 100;
 

@@ -23,18 +23,18 @@ interface IGameToken {
      * @param amount The amount of tokens to transfer
      * @return success Whether the transfer was successful
      */
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool success);
+    // function transferFrom(
+    //     address from,
+    //     address to,
+    //     uint256 amount
+    // ) external returns (bool success);
 
     /**
      * @notice Get the balance of an address
      * @param account The address to get the balance of
      * @return balance The balance of the address
      */
-    function balanceOf(address account) external view returns (uint256 balance);
+    // function balanceOf(address account) external view returns (uint256 balance);
 
     /**
      * @notice Approve an address to spend tokens
@@ -42,7 +42,7 @@ interface IGameToken {
      * @param amount The amount of tokens to approve
      * @return success Whether the approval was successful
      */
-    function approve(address spender, uint256 amount) external returns (bool success);
+    // function approve(address spender, uint256 amount) external returns (bool success);
 
     /**
      * @notice Get the allowance of an address
@@ -50,5 +50,13 @@ interface IGameToken {
      * @param spender The address to check the allowance of
      * @return allowance The allowance of the address
      */
-    function allowance(address owner, address spender) external view returns (uint256 allowance);
+    // function allowance(address owner, address spender) external view returns (uint256 allowance);
+
+    /**
+     * @notice Transfer tokens to an address
+     * @param to The address to transfer tokens to
+     * @param amount The amount of tokens to transfer
+     * @return success Whether the transfer was successful
+     */
+    // function transfer(address to, uint256 amount) external returns (bool success);
 }
