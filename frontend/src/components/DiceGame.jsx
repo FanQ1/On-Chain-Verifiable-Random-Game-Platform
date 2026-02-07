@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 
-const DiceGame = ({ account, contractAddress, abi }) => {
+const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
   const [betAmount, setBetAmount] = useState('1');
   const [prediction, setPrediction] = useState(50);
   const [potentialPayout, setPotentialPayout] = useState('0');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
   const [gameHistory, setGameHistory] = useState([]);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [contract, setContract] = useState(null);
+  const [gameTokenContract, setGameTokenContract] = useState(null);
+  const [allowance, setAllowance] = useState('0');
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -18,7 +21,14 @@ const DiceGame = ({ account, contractAddress, abi }) => {
       setContract(diceGameContract);
       loadGameHistory(diceGameContract);
     }
-  }, [account, contractAddress, abi]);
+
+    if (window.ethereum && account && gameTokenAddress && gameTokenAbi) {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const gameToken = new ethers.Contract(gameTokenAddress, gameTokenAbi, provider);
+      setGameTokenContract(gameToken);
+      loadAllowance(gameToken);
+    }
+  }, [account, contractAddress, abi, gameTokenAddress, gameTokenAbi]);
 
   useEffect(() => {
     calculatePayout();
@@ -27,13 +37,30 @@ const DiceGame = ({ account, contractAddress, abi }) => {
   const calculatePayout = async () => {
     if (!contract) return;
     try {
+      const betAmountWei = ethers.parseEther(betAmount);
+      console.log('Calculating payout for betAmount:', betAmountWei, 'prediction:', prediction);
       const payout = await contract.calculatePayout(
-        ethers.parseEther(betAmount),
+        betAmountWei,
         prediction
       );
-      setPotentialPayout(ethers.formatEther(payout));
+      console.log('Payout:', payout);
+      // Convert BigInt to string before formatting
+      const payoutString = payout.toString();
+      setPotentialPayout(ethers.formatEther(payoutString));
     } catch (error) {
       console.error('Error calculating payout:', error);
+      setError('Error calculating payout: ' + error.message);
+    }
+  };
+
+  const loadAllowance = async (gameToken) => {
+    try {
+      if (account && contractAddress) {
+        const allowanceAmount = await gameToken.allowance(account, contractAddress);
+        setAllowance(ethers.formatEther(allowanceAmount.toString()));
+      }
+    } catch (error) {
+      console.error('Error loading allowance:', error);
     }
   };
 
@@ -45,10 +72,10 @@ const DiceGame = ({ account, contractAddress, abi }) => {
           const game = await diceGameContract.getGame(gameId);
           return {
             id: gameId.toString(),
-            betAmount: ethers.formatEther(game.betAmount),
+            betAmount: ethers.formatEther(game.betAmount.toString()),
             prediction: game.prediction.toString(),
             rollResult: game.rollResult.toString(),
-            payout: ethers.formatEther(game.payout),
+            payout: ethers.formatEther(game.payout.toString()),
             isCompleted: game.isCompleted
           };
         })
@@ -56,6 +83,32 @@ const DiceGame = ({ account, contractAddress, abi }) => {
       setGameHistory(gameDetails.reverse());
     } catch (error) {
       console.error('Error loading game history:', error);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!gameTokenContract || !account) return;
+
+    setIsApproving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+      const gameTokenWithSigner = gameTokenContract.connect(signer);
+
+      // Approve a large amount (10000 tokens)
+      const approveAmount = ethers.parseEther('10000');
+      const tx = await gameTokenWithSigner.approve(contractAddress, approveAmount);
+      await tx.wait();
+
+      setSuccess('Approval successful! You can now play the game.');
+      await loadAllowance(gameTokenContract);
+    } catch (error) {
+      console.error('Error approving tokens:', error);
+      setError(error.message || 'Failed to approve tokens');
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -74,9 +127,39 @@ const DiceGame = ({ account, contractAddress, abi }) => {
         ethers.parseEther(betAmount),
         prediction
       );
-      await tx.wait();
+      const receipt = await tx.wait();
 
-      setSuccess('Game started! Waiting for result...');
+      // Get the requestId from the event
+      const event = receipt.logs.find(log => {
+        try {
+          const parsed = contract.interface.parseLog(log);
+          return parsed.name === 'GameStarted';
+        } catch (e) {
+          return false;
+        }
+      });
+
+      if (event) {
+        const parsed = contract.interface.parseLog(event);
+        const gameId = parsed.args.gameId;
+
+        // Manually fulfill the random words request
+        // This is a workaround for the local testing environment
+        // In production, this would be done automatically by the Chainlink VRF
+        const vrfCoordinatorAddress = '0xc5a5C42992dECbae36851359345FE25997F5C42d';
+        const vrfCoordinatorAbi = [
+          'function fulfillRandomWords(uint256 requestId) external'
+        ];
+        const vrfCoordinator = new ethers.Contract(vrfCoordinatorAddress, vrfCoordinatorAbi, signer);
+
+        // The requestId is the gameId + 1 (because requestId starts from 1)
+        // Convert BigInt to number before adding 1
+        const gameIdNumber = typeof gameId === 'bigint' ? Number(gameId) : gameId;
+        const requestId = gameIdNumber + 1;
+        await vrfCoordinator.fulfillRandomWords(requestId);
+      }
+
+      setSuccess('Game completed!');
       await loadGameHistory(contract);
     } catch (error) {
       console.error('Error starting game:', error);
@@ -136,24 +219,39 @@ const DiceGame = ({ account, contractAddress, abi }) => {
         </div>
 
         <div className="payout-info">
-          <p><strong>Potential Payout:</strong> {parseFloat(potentialPayout).toFixed(4)} GT</p>
-          <p><strong>Multiplier:</strong> {(parseFloat(potentialPayout) / parseFloat(betAmount)).toFixed(2)}x</p>
+          <p><strong>Potential Payout:</strong> {parseFloat(potentialPayout || '0').toFixed(4)} GT</p>
+          <p><strong>Multiplier:</strong> {parseFloat(betAmount || '1') > 0 ? (parseFloat(potentialPayout || '0') / parseFloat(betAmount || '1')).toFixed(2) : '0.00'}x</p>
+          <p><strong>Allowance:</strong> {parseFloat(allowance || '0').toFixed(4)} GT</p>
         </div>
 
         {error && <div className="error">{error}</div>}
         {success && <div className="success">{success}</div>}
 
-        <button
-          className="button"
-          onClick={handlePlay}
-          disabled={!account || isPlaying}
-        >
-          {isPlaying ? (
-            <span className="loading"></span>
-          ) : (
-            'Roll Dice'
-          )}
-        </button>
+        {parseFloat(allowance) < parseFloat(betAmount) ? (
+          <button
+            className="button"
+            onClick={handleApprove}
+            disabled={!account || isApproving}
+          >
+            {isApproving ? (
+              <span className="loading"></span>
+            ) : (
+              'Approve Tokens'
+            )}
+          </button>
+        ) : (
+          <button
+            className="button"
+            onClick={handlePlay}
+            disabled={!account || isPlaying}
+          >
+            {isPlaying ? (
+              <span className="loading"></span>
+            ) : (
+              'Roll Dice'
+            )}
+          </button>
+        )}
 
         {!account && (
           <p className="connect-prompt">Please connect your wallet to play</p>

@@ -40,10 +40,16 @@ contract VRFCoordinatorV2Mock is IVRFCoordinatorV2 {
 
         emit RandomWordsRequested(requestId, msg.sender);
 
-        // Simulate VRF response after a delay
-        _fulfillRandomWords(requestId, numWords);
-
+        // Don't fulfill immediately - let it be done manually
         return requestId;
+    }
+
+    /**
+     * @notice Manually fulfill a random words request
+     * @param requestId The request ID to fulfill
+     */
+    function fulfillRandomWords(uint256 requestId) external {
+        _fulfillRandomWords(requestId, 1);
     }
 
     /**

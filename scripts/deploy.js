@@ -56,7 +56,7 @@ async function main() {
 
   // Mint tokens to games
   console.log("\nMinting tokens to games...");
-  const mintAmount = hre.ethers.parseEther("100000");
+  const mintAmount = hre.ethers.parseEther("1000000");
   await gameToken.mint(lotteryAddress, mintAmount);
   await gameToken.mint(diceGameAddress, mintAmount);
   console.log("Tokens minted to games");

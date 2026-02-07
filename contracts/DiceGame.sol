@@ -137,11 +137,27 @@ contract DiceGame is Ownable, ReentrancyGuard {
             uint256 houseEdge = (grossPayout * HOUSE_EDGE) / 100;
             game.payout = grossPayout - houseEdge;
 
-            // Transfer payout to player
-            require(
-                gameToken.transfer(game.player, game.payout),
-                "DiceGame: Payout transfer failed"
-            );
+            // Check if contract has enough tokens
+            uint256 contractBalance = gameToken.balanceOf(address(this));
+            if (contractBalance >= game.payout) {
+                // Transfer payout to player
+                (bool success, ) = address(gameToken).call(
+                    abi.encodeWithSignature("transfer(address,uint256)", game.player, game.payout)
+                );
+                if (!success) {
+                    game.payout = 0;
+                }
+            } else {
+                // If not enough tokens, transfer what we have
+                (bool success, ) = address(gameToken).call(
+                    abi.encodeWithSignature("transfer(address,uint256)", game.player, contractBalance)
+                );
+                if (!success) {
+                    game.payout = 0;
+                } else {
+                    game.payout = contractBalance;
+                }
+            }
         } else {
             game.payout = 0;
         }

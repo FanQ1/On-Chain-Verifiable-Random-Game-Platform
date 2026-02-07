@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-interface IGameToken {
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+interface IGameToken is IERC20 {
     /**
      * @notice Mint tokens to an address
      * @param to The address to mint tokens to
@@ -15,5 +17,4 @@ interface IGameToken {
      * @param amount The amount of tokens to burn
      */
     function burn(address from, uint256 amount) external;
-
 }

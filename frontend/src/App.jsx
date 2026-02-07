@@ -7,6 +7,7 @@ import './index.css';
 function App() {
   const [account, setAccount] = useState(null);
   const [contracts, setContracts] = useState({
+    gameToken: { address: null, abi: null },
     lottery: { address: null, abi: null },
     diceGame: { address: null, abi: null }
   });
@@ -22,13 +23,17 @@ function App() {
       const deploymentInfo = await response.json();
 
       setContracts({
+        gameToken: {
+          address: deploymentInfo.contracts.GameToken,
+          abi: require('./contracts/GameToken.json').abi
+        },
         lottery: {
           address: deploymentInfo.contracts.Lottery,
-          abi: require('./contracts/Lottery.json')
+          abi: require('./contracts/Lottery.json').abi
         },
         diceGame: {
           address: deploymentInfo.contracts.DiceGame,
-          abi: require('./contracts/DiceGame.json')
+          abi: require('./contracts/DiceGame.json').abi
         }
       });
     } catch (error) {
@@ -70,6 +75,8 @@ function App() {
                 account={account}
                 contractAddress={contracts.diceGame.address}
                 abi={contracts.diceGame.abi}
+                gameTokenAddress={contracts.gameToken.address}
+                gameTokenAbi={contracts.gameToken.abi}
               />
             )}
           </section>
