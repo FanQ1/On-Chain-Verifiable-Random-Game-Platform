@@ -41,6 +41,7 @@ contract Lottery is Ownable, ReentrancyGuard {
 
     mapping(uint256 => LotteryInfo) public lotteries;
     mapping(uint256 => uint256) public requestIdToLotteryId;
+    bool public pendingDraw;
     mapping(address => uint256[]) public playerLotteries; // Track lotteries a player has participated in
 
     event LotteryCreated(uint256 indexed lotteryId, uint256 startTime, uint256 endTime);
@@ -144,6 +145,7 @@ contract Lottery is Ownable, ReentrancyGuard {
         require(lottery.isActive && !lottery.isDrawn, "Lottery: Invalid lottery state");
 
         lottery.isActive = false;
+        pendingDraw = true;
 
         uint256 requestId = vrfCoordinator.requestRandomWords(
             keyHash,
@@ -156,9 +158,6 @@ contract Lottery is Ownable, ReentrancyGuard {
         requestIdToLotteryId[requestId] = lotteryId;
 
         emit LotteryDrawRequested(lotteryId, requestId);
-
-        // Create new lottery
-        _createNewLottery();
     }
 
     /**
@@ -195,6 +194,12 @@ contract Lottery is Ownable, ReentrancyGuard {
 
         emit LotteryDrawn(lotteryId, winner, lottery.winningNumber, prize);
         emit PrizeClaimed(lotteryId, winner, prize);
+
+        // Create new lottery after draw is complete
+        if (pendingDraw) {
+            pendingDraw = false;
+            _createNewLottery();
+        }
     }
 
     /**

@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 
-const LotteryGame = ({ account, contractAddress, abi }) => {
+const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
   const [lotteryInfo, setLotteryInfo] = useState(null);
   const [ticketCount, setTicketCount] = useState(1);
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isMinting, setIsMinting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [contract, setContract] = useState(null);
+  const [gameTokenContract, setGameTokenContract] = useState(null);
+  const [allowance, setAllowance] = useState('0');
+  const [tokenBalance, setTokenBalance] = useState('0');
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -16,7 +21,14 @@ const LotteryGame = ({ account, contractAddress, abi }) => {
       setContract(lotteryContract);
       loadLotteryInfo(lotteryContract);
     }
-  }, [account, contractAddress, abi]);
+    if (window.ethereum && account && gameTokenAddress && gameTokenAbi) {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const gameToken = new ethers.Contract(gameTokenAddress, gameTokenAbi, provider);
+      setGameTokenContract(gameToken);
+      loadAllowance(gameToken);
+      loadTokenBalance(gameToken);
+    }
+  }, [account, contractAddress, abi, gameTokenAddress, gameTokenAbi]);
 
   const loadLotteryInfo = async (lotteryContract) => {
     try {
@@ -36,6 +48,80 @@ const LotteryGame = ({ account, contractAddress, abi }) => {
     } catch (error) {
       console.error('Error loading lottery info:', error);
       setError('Failed to load lottery information');
+    }
+  };
+
+  const handleApprove = async () => {
+      if (!gameTokenContract || !account) return;
+  
+      setIsApproving(true);
+      setError(null);
+      setSuccess(null);
+  
+      try {
+        const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+        const gameTokenWithSigner = gameTokenContract.connect(signer);
+  
+        // Approve a large amount (10000 tokens)
+        const approveAmount = ethers.parseEther('10000');
+        const tx = await gameTokenWithSigner.approve(contractAddress, approveAmount);
+        await tx.wait();
+  
+        setSuccess('Approval successful! You can now play the game.');
+        await loadAllowance(gameTokenContract);
+      } catch (error) {
+        console.error('Error approving tokens:', error);
+        setError(error.message || 'Failed to approve tokens');
+      } finally {
+        setIsApproving(false);
+      }
+    };
+
+  const loadAllowance = async (gameToken) => {
+      try {
+        if (account && contractAddress) {
+          const allowanceAmount = await gameToken.allowance(account, contractAddress);
+          setAllowance(ethers.formatEther(allowanceAmount.toString()));
+        }
+      } catch (error) {
+        console.error('Error loading allowance:', error);
+      }
+    };
+
+  const loadTokenBalance = async (gameToken) => {
+    if (!account) return;
+    try {
+      const balance = await gameToken.balanceOf(account);
+      setTokenBalance(ethers.formatEther(balance.toString()));
+    } catch (error) {
+      console.error('Error loading token balance:', error);
+    }
+  };
+
+  const handleMintWithEth = async () => {
+    if (!gameTokenContract || !account) return;
+
+    setIsMinting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+      const tokenWithSigner = gameTokenContract.connect(signer);
+
+      const mintAmount = ethers.parseEther('10000');
+      const fee = ethers.parseEther('0.01');
+
+      const tx = await tokenWithSigner.mintWithEth(mintAmount, { value: fee });
+      await tx.wait();
+
+      setSuccess('Successfully got 10000 GT!');
+      await loadTokenBalance(gameTokenContract);
+    } catch (error) {
+      console.error('Error minting tokens:', error);
+      setError(error.message || 'Failed to get GT');
+    } finally {
+      setIsMinting(false);
     }
   };
 
@@ -71,6 +157,25 @@ const LotteryGame = ({ account, contractAddress, abi }) => {
     <div className="game-card">
       <h2>🎰 Lottery Game</h2>
 
+      {account && (
+        <div className="token-balance">
+          <p><strong>Your GT Balance:</strong> {parseFloat(tokenBalance || '0').toFixed(2)} GT</p>
+        </div>
+      )}
+
+      {parseFloat(tokenBalance) === 0 && account && (
+        <div className="mint-section">
+          <p className="mint-info">Get 10000 GT for 0.01 ETH</p>
+          <button
+            className="button mint-button"
+            onClick={handleMintWithEth}
+            disabled={!account || isMinting}
+          >
+            {isMinting ? <span className="loading"></span> : 'Get GT'}
+          </button>
+        </div>
+      )}
+
       <div className="info-box">
         <p><strong>Lottery ID:</strong> #{lotteryInfo.id}</p>
         <p><strong>Start Time:</strong> {lotteryInfo.startTime}</p>
@@ -89,9 +194,13 @@ const LotteryGame = ({ account, contractAddress, abi }) => {
       {error && <div className="error">{error}</div>}
       {success && <div className="success">{success}</div>}
 
+      <div className="payout-info">
+        <p><strong>Allowance:</strong> {parseFloat(allowance || '0').toFixed(4)} GT</p>
+      </div>
+
       {lotteryInfo.isActive && (
         <div className="purchase-section">
-          <h3>Purchase Tickets</h3>
+          <h3>Purchase Tickets (1 Ticket = 1000 GT)</h3>
           <div className="input-group">
             <label htmlFor="ticketCount">Number of Tickets:</label>
             <input
@@ -104,17 +213,32 @@ const LotteryGame = ({ account, contractAddress, abi }) => {
               onChange={(e) => setTicketCount(parseInt(e.target.value))}
             />
           </div>
-          <button
-            className="button"
-            onClick={handlePurchase}
-            disabled={!account || isPurchasing}
-          >
-            {isPurchasing ? (
-              <span className="loading"></span>
-            ) : (
-              `Purchase ${ticketCount} Ticket(s)`
-            )}
-          </button>
+          <p className="cost-info">Total Cost: {ticketCount * 1000} GT</p>
+          {parseFloat(allowance) < (ticketCount * 1000) ? (
+            <button
+              className="button"
+              onClick={handleApprove}
+              disabled={!account || isApproving}
+            >
+              {isApproving ? (
+                <span className="loading"></span>
+              ) : (
+                'Approve Tokens'
+              )}
+            </button>
+          ) : (
+            <button
+              className="button"
+              onClick={handlePurchase}
+              disabled={!account || isPurchasing}
+            >
+              {isPurchasing ? (
+                <span className="loading"></span>
+              ) : (
+                `Purchase ${ticketCount} Ticket(s)`
+              )}
+            </button>
+          )}
         </div>
       )}
 

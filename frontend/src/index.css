@@ -141,6 +141,53 @@ code {
   to { transform: rotate(360deg); }
 }
 
+.token-balance {
+  background: rgba(255, 215, 0, 0.2);
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.token-balance p {
+  color: #ffd700;
+  margin: 0;
+  font-weight: bold;
+}
+
+.mint-section {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 15px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.mint-info {
+  color: #aaa;
+  margin-bottom: 10px;
+}
+
+.mint-button {
+  background: #ff9800;
+  width: 100%;
+}
+
+.mint-button:hover {
+  background: #e68900;
+}
+
+.waiting-result {
+  color: #ffd700;
+  font-weight: bold;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 @media (max-width: 768px) {
   .game-container {
     grid-template-columns: 1fr;

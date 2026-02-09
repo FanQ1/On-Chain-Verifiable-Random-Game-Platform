@@ -106,4 +106,12 @@ contract VRFCoordinatorV2Mock is IVRFCoordinatorV2 {
     function getRequestTimestamp(uint256 requestId) external view returns (uint256 timestamp) {
         return requestToTimestamp[requestId];
     }
+
+    /**
+     * @notice Get the current request ID counter
+     * @return counter The current counter value
+     */
+    function getRequestIdCounter() external view returns (uint256 counter) {
+        return requestIdCounter;
+    }
 }

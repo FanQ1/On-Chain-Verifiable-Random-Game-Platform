@@ -67,6 +67,8 @@ function App() {
                 account={account}
                 contractAddress={contracts.lottery.address}
                 abi={contracts.lottery.abi}
+                gameTokenAddress={contracts.gameToken.address}
+                gameTokenAbi={contracts.gameToken.abi}
               />
             )}
 

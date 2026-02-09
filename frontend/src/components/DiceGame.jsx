@@ -7,12 +7,14 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
   const [potentialPayout, setPotentialPayout] = useState('0');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [isMinting, setIsMinting] = useState(false);
   const [gameHistory, setGameHistory] = useState([]);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [contract, setContract] = useState(null);
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
+  const [tokenBalance, setTokenBalance] = useState('0');
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -27,6 +29,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       const gameToken = new ethers.Contract(gameTokenAddress, gameTokenAbi, provider);
       setGameTokenContract(gameToken);
       loadAllowance(gameToken);
+      loadTokenBalance(gameToken);
     }
   }, [account, contractAddress, abi, gameTokenAddress, gameTokenAbi]);
 
@@ -64,7 +67,18 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
     }
   };
 
+  const loadTokenBalance = async (gameToken) => {
+    if (!account) return;
+    try {
+      const balance = await gameToken.balanceOf(account);
+      setTokenBalance(ethers.formatEther(balance.toString()));
+    } catch (error) {
+      console.error('Error loading token balance:', error);
+    }
+  };
+
   const loadGameHistory = async (diceGameContract) => {
+    if (!account) return;
     try {
       const games = await diceGameContract.getPlayerGames(account);
       const gameDetails = await Promise.all(
@@ -83,6 +97,33 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       setGameHistory(gameDetails.reverse());
     } catch (error) {
       console.error('Error loading game history:', error);
+    }
+  };
+
+  const handleMintWithEth = async () => {
+    if (!gameTokenContract || !account) return;
+
+    setIsMinting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+      const tokenWithSigner = gameTokenContract.connect(signer);
+
+      const mintAmount = ethers.parseEther('10000');
+      const fee = ethers.parseEther('0.01');
+
+      const tx = await tokenWithSigner.mintWithEth(mintAmount, { value: fee });
+      await tx.wait();
+
+      setSuccess('Successfully got 10000 GT!');
+      await loadTokenBalance(gameTokenContract);
+    } catch (error) {
+      console.error('Error minting tokens:', error);
+      setError(error.message || 'Failed to get GT');
+    } finally {
+      setIsMinting(false);
     }
   };
 
@@ -146,7 +187,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
         // Manually fulfill the random words request
         // This is a workaround for the local testing environment
         // In production, this would be done automatically by the Chainlink VRF
-        const vrfCoordinatorAddress = '0xc5a5C42992dECbae36851359345FE25997F5C42d';
+        const vrfCoordinatorAddress = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
         const vrfCoordinatorAbi = [
           'function fulfillRandomWords(uint256 requestId) external'
         ];
@@ -172,6 +213,25 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
   return (
     <div className="game-card">
       <h2>🎲 Dice Game</h2>
+
+      {account && (
+        <div className="token-balance">
+          <p><strong>Your GT Balance:</strong> {parseFloat(tokenBalance || '0').toFixed(2)} GT</p>
+        </div>
+      )}
+
+      {parseFloat(tokenBalance) === 0 && account && (
+        <div className="mint-section">
+          <p className="mint-info">Get 10000 GT for 0.01 ETH</p>
+          <button
+            className="button mint-button"
+            onClick={handleMintWithEth}
+            disabled={!account || isMinting}
+          >
+            {isMinting ? <span className="loading"></span> : 'Get GT'}
+          </button>
+        </div>
+      )}
 
       <div className="info-box">
         <p><strong>Rules:</strong></p>
@@ -267,10 +327,16 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
                 <p><strong>Game #{game.id}</strong></p>
                 <p>Bet: {parseFloat(game.betAmount).toFixed(4)} GT</p>
                 <p>Prediction: {game.prediction}</p>
-                <p>Roll: {game.rollResult}</p>
-                <p>Result: {parseFloat(game.payout) > 0 ? 
-                  `Won ${parseFloat(game.payout).toFixed(4)} GT` : 
-                  'Lost'}</p>
+                {parseInt(game.rollResult) === 0 || !game.isCompleted ? (
+                  <p className="waiting-result">Waiting for result...</p>
+                ) : (
+                  <>
+                    <p>Roll: {game.rollResult}</p>
+                    <p>Result: {parseFloat(game.payout) > 0 ? 
+                      `Won ${parseFloat(game.payout).toFixed(4)} GT` : 
+                      'Lost'}</p>
+                  </>
+                )}
               </div>
             ))}
           </div>
