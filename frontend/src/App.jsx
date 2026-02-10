@@ -53,14 +53,17 @@ function App() {
     <div className="App">
       <div className="container">
         <header className="header">
-          <h1>🎮 On-Chain Random Game Platform</h1>
+          <div className="brand-block">
+            <h1>🎮 On-Chain Random Game Platform</h1>
+            <p className="header-subtitle">Provably fair gaming powered by on-chain randomness</p>
+          </div>
           <WalletConnect 
             onConnect={handleConnect} 
             onDisconnect={handleDisconnect}
           />
         </header>
 
-        <main>
+        <main className="app-main">
           <section className="game-container">
             {contracts.lottery.address && contracts.lottery.abi && (
               <LotteryGame
@@ -84,6 +87,7 @@ function App() {
           </section>
 
           <section className="info-section">
+            <h2 className="section-title">Platform Guide</h2>
             <div className="info-box">
               <h2>About Our Platform</h2>
               <p>

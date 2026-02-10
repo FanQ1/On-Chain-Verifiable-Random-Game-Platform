@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { InlineError } from './ui/InlineStatus';
 import { useToast } from './ui/ToastProvider';
+import Button from './ui/Button';
 
 const WalletConnect = ({ onConnect, onDisconnect }) => {
   const [account, setAccount] = useState(null);
@@ -104,18 +105,16 @@ const WalletConnect = ({ onConnect, onDisconnect }) => {
           <div className="balance">
             {parseFloat(balance).toFixed(4)} ETH
           </div>
-          <button className="button" onClick={disconnect}>
-            Disconnect
-          </button>
+          <Button variant="secondary" size="sm" onClick={disconnect}>Disconnect</Button>
         </div>
       ) : (
-        <button 
-          className="button" 
+        <Button
           onClick={connect} 
+          loading={isConnecting}
           disabled={isConnecting}
         >
-          {isConnecting ? <span className="loading"></span> : 'Connect Wallet'}
-        </button>
+          Connect Wallet
+        </Button>
       )}
     </div>
   );

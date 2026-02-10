@@ -4,6 +4,12 @@ import { InlineError, InlineSuccess } from './ui/InlineStatus';
 import Skeleton from './ui/Skeleton';
 import EmptyState from './ui/EmptyState';
 import { useToast } from './ui/ToastProvider';
+import Button from './ui/Button';
+import Card from './ui/Card';
+import Input from './ui/Input';
+import StatItem from './ui/StatItem';
+import StatusTag from './ui/StatusTag';
+import TransactionStepper from './ui/TransactionStepper';
 
 const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
   const [betAmount, setBetAmount] = useState('1');
@@ -20,6 +26,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
   const [allowance, setAllowance] = useState('0');
   const [tokenBalance, setTokenBalance] = useState('0');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [flowStage, setFlowStage] = useState('idle');
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -42,6 +49,17 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
   useEffect(() => {
     calculatePayout();
   }, [betAmount, prediction]);
+
+  useEffect(() => {
+    if (!account) {
+      setFlowStage('idle');
+      return;
+    }
+
+    if (!isApproving && !isPlaying) {
+      setFlowStage(parseFloat(allowance || '0') >= parseFloat(betAmount || '0') ? 'ready' : 'idle');
+    }
+  }, [account, allowance, betAmount, isApproving, isPlaying]);
 
   const calculatePayout = async () => {
     if (!contract) return;
@@ -143,6 +161,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
     if (!gameTokenContract || !account) return;
 
     setIsApproving(true);
+    setFlowStage('approving');
     setError(null);
     setSuccess(null);
 
@@ -153,14 +172,17 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       // Approve a large amount (10000 tokens)
       const approveAmount = ethers.parseEther('10000');
       const tx = await gameTokenWithSigner.approve(contractAddress, approveAmount);
+      setFlowStage('confirming');
       await tx.wait();
 
       setSuccess('Approval successful! You can now play the game.');
+      setFlowStage('ready');
       showToast('Approval successful', 'success');
       await loadAllowance(gameTokenContract);
     } catch (error) {
       console.error('Error approving tokens:', error);
       setError(error.message || 'Failed to approve tokens');
+      setFlowStage('error');
       showToast('Approval failed', 'error');
     } finally {
       setIsApproving(false);
@@ -171,6 +193,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
     if (!contract || !account) return;
 
     setIsPlaying(true);
+    setFlowStage('submitting');
     setError(null);
     setSuccess(null);
 
@@ -182,6 +205,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
         ethers.parseEther(betAmount),
         prediction
       );
+      setFlowStage('confirming');
       const receipt = await tx.wait();
 
       // Get the requestId from the event
@@ -215,37 +239,48 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       }
 
       setSuccess('Game completed!');
+      setFlowStage('done');
       showToast('Game completed', 'success');
       await loadGameHistory(contract);
     } catch (error) {
       console.error('Error starting game:', error);
       setError(error.message || 'Failed to start game');
+      setFlowStage('error');
       showToast('Failed to start game', 'error');
     } finally {
       setIsPlaying(false);
     }
   };
 
+  const getHistoryStage = (game) => {
+    if (!game.isCompleted || parseInt(game.rollResult, 10) === 0) {
+      return 'confirming';
+    }
+    return 'done';
+  };
+
   return (
-    <div className="game-card">
-      <h2>🎲 Dice Game</h2>
+    <Card title="Dice Game" icon="🎲" className="game-card dice-card">
 
       {account && (
         <div className="token-balance">
-          <p><strong>Your GT Balance:</strong> {parseFloat(tokenBalance || '0').toFixed(2)} GT</p>
+          <span className="token-balance-label">GT Balance</span>
+          <span className="token-balance-value">{parseFloat(tokenBalance || '0').toFixed(2)} GT</span>
         </div>
       )}
 
       {parseFloat(tokenBalance) === 0 && account && (
         <div className="mint-section">
           <p className="mint-info">Get 10000 GT for 0.01 ETH</p>
-          <button
-            className="button mint-button"
+          <Button
+            variant="accent"
+            fullWidth
             onClick={handleMintWithEth}
             disabled={!account || isMinting}
+            loading={isMinting}
           >
-            {isMinting ? <span className="loading"></span> : 'Get GT'}
-          </button>
+            Get GT
+          </Button>
         </div>
       )}
 
@@ -261,19 +296,16 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       </div>
 
       <div className="game-controls">
-        <div className="input-group">
-          <label htmlFor="betAmount">Bet Amount (GT):</label>
-          <input
-            type="number"
-            id="betAmount"
-            className="input"
-            min="0.001"
-            max="10"
-            step="0.001"
-            value={betAmount}
-            onChange={(e) => setBetAmount(e.target.value)}
-          />
-        </div>
+        <Input
+          type="number"
+          id="betAmount"
+          label="Bet Amount (GT)"
+          min="0.001"
+          max="10"
+          step="0.001"
+          value={betAmount}
+          onChange={(e) => setBetAmount(e.target.value)}
+        />
 
         <div className="input-group">
           <label htmlFor="prediction">Prediction (1-100):</label>
@@ -295,38 +327,36 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
         </div>
 
         <div className="payout-info">
-          <p><strong>Potential Payout:</strong> {parseFloat(potentialPayout || '0').toFixed(4)} GT</p>
-          <p><strong>Multiplier:</strong> {parseFloat(betAmount || '1') > 0 ? (parseFloat(potentialPayout || '0') / parseFloat(betAmount || '1')).toFixed(2) : '0.00'}x</p>
-          <p><strong>Allowance:</strong> {parseFloat(allowance || '0').toFixed(4)} GT</p>
+          <StatItem label="Potential Payout" value={`${parseFloat(potentialPayout || '0').toFixed(4)} GT`} />
+          <StatItem label="Multiplier" value={`${parseFloat(betAmount || '1') > 0 ? (parseFloat(potentialPayout || '0') / parseFloat(betAmount || '1')).toFixed(2) : '0.00'}x`} />
+          <StatItem label="Allowance" value={`${parseFloat(allowance || '0').toFixed(4)} GT`} />
         </div>
 
         <InlineError message={error} />
         <InlineSuccess message={success} />
 
+        <TransactionStepper
+          stage={flowStage}
+          actionLabel="Play"
+          approvalRequired={parseFloat(allowance) < parseFloat(betAmount || '0')}
+        />
+
         {parseFloat(allowance) < parseFloat(betAmount) ? (
-          <button
-            className="button"
+          <Button
             onClick={handleApprove}
             disabled={!account || isApproving}
+            loading={isApproving}
           >
-            {isApproving ? (
-              <span className="loading"></span>
-            ) : (
-              'Approve Tokens'
-            )}
-          </button>
+            Approve Tokens
+          </Button>
         ) : (
-          <button
-            className="button"
+          <Button
             onClick={handlePlay}
             disabled={!account || isPlaying}
+            loading={isPlaying}
           >
-            {isPlaying ? (
-              <span className="loading"></span>
-            ) : (
-              'Roll Dice'
-            )}
-          </button>
+            Roll Dice
+          </Button>
         )}
 
         {!account && (
@@ -348,24 +378,42 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
             {gameHistory.map((game) => (
               <div key={game.id} className="history-item">
                 <p><strong>Game #{game.id}</strong></p>
-                <p>Bet: {parseFloat(game.betAmount).toFixed(4)} GT</p>
-                <p>Prediction: {game.prediction}</p>
-                {parseInt(game.rollResult) === 0 || !game.isCompleted ? (
-                  <p className="waiting-result">Waiting for result...</p>
-                ) : (
-                  <>
-                    <p>Roll: {game.rollResult}</p>
-                    <p>Result: {parseFloat(game.payout) > 0 ?
-                      `Won ${parseFloat(game.payout).toFixed(4)} GT` :
-                      'Lost'}</p>
-                  </>
-                )}
+                <div className="history-status-box">
+                  <TransactionStepper
+                    stage={getHistoryStage(game)}
+                    actionLabel="Play"
+                    approvalRequired={false}
+                    compact
+                    hideHint
+                  />
+                  <div className="history-meta-grid">
+                    <p className="history-meta-item"><strong>Bet:</strong> {parseFloat(game.betAmount).toFixed(4)} GT</p>
+                    <p className="history-meta-item"><strong>Prediction:</strong> {game.prediction}</p>
+                    {parseInt(game.rollResult) === 0 || !game.isCompleted ? (
+                      <p className="history-meta-item">
+                        <strong>Result:</strong> <StatusTag type="info">Waiting for result...</StatusTag>
+                      </p>
+                    ) : (
+                      <>
+                        <p className="history-meta-item"><strong>Roll:</strong> {game.rollResult}</p>
+                        <p className="history-meta-item">
+                          <strong>Result:</strong>{' '}
+                          {parseFloat(game.payout) > 0 ? (
+                            <StatusTag type="active">{`Won ${parseFloat(game.payout).toFixed(4)} GT`}</StatusTag>
+                          ) : (
+                            <StatusTag type="ended">Lost</StatusTag>
+                          )}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 };
 

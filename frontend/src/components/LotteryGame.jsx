@@ -4,6 +4,12 @@ import { InlineError, InlineSuccess } from './ui/InlineStatus';
 import Skeleton from './ui/Skeleton';
 import EmptyState from './ui/EmptyState';
 import { useToast } from './ui/ToastProvider';
+import Button from './ui/Button';
+import Card from './ui/Card';
+import Input from './ui/Input';
+import StatItem from './ui/StatItem';
+import StatusTag from './ui/StatusTag';
+import TransactionStepper from './ui/TransactionStepper';
 
 const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
   const [lotteryInfo, setLotteryInfo] = useState(null);
@@ -18,6 +24,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
   const [tokenBalance, setTokenBalance] = useState('0');
+  const [flowStage, setFlowStage] = useState('idle');
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -35,6 +42,18 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       loadTokenBalance(gameToken);
     }
   }, [account, contractAddress, abi, gameTokenAddress, gameTokenAbi]);
+
+  useEffect(() => {
+    if (!account) {
+      setFlowStage('idle');
+      return;
+    }
+
+    if (!isApproving && !isPurchasing) {
+      const requiredAllowance = ticketCount * 1000;
+      setFlowStage(parseFloat(allowance || '0') >= requiredAllowance ? 'ready' : 'idle');
+    }
+  }, [account, allowance, ticketCount, isApproving, isPurchasing]);
 
   const loadLotteryInfo = async (lotteryContract) => {
     try {
@@ -65,6 +84,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       if (!gameTokenContract || !account) return;
   
       setIsApproving(true);
+      setFlowStage('approving');
       setError(null);
       setSuccess(null);
   
@@ -75,14 +95,17 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
         // Approve a large amount (10000 tokens)
         const approveAmount = ethers.parseEther('10000');
         const tx = await gameTokenWithSigner.approve(contractAddress, approveAmount);
+        setFlowStage('confirming');
         await tx.wait();
   
         setSuccess('Approval successful! You can now play the game.');
+        setFlowStage('ready');
         showToast('Approval successful', 'success');
         await loadAllowance(gameTokenContract);
       } catch (error) {
         console.error('Error approving tokens:', error);
         setError(error.message || 'Failed to approve tokens');
+        setFlowStage('error');
         showToast('Approval failed', 'error');
       } finally {
         setIsApproving(false);
@@ -143,6 +166,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
     if (!contract || !account) return;
 
     setIsPurchasing(true);
+    setFlowStage('submitting');
     setError(null);
     setSuccess(null);
 
@@ -151,14 +175,17 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       const contractWithSigner = contract.connect(signer);
 
       const tx = await contractWithSigner.purchaseTickets(ticketCount);
+      setFlowStage('confirming');
       await tx.wait();
 
       setSuccess(`Successfully purchased ${ticketCount} ticket(s)!`);
+      setFlowStage('done');
       showToast(`Purchased ${ticketCount} ticket(s)`, 'success');
       await loadLotteryInfo(contract);
     } catch (error) {
       console.error('Error purchasing tickets:', error);
       setError(error.message || 'Failed to purchase tickets');
+      setFlowStage('error');
       showToast('Ticket purchase failed', 'error');
     } finally {
       setIsPurchasing(false);
@@ -167,59 +194,59 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
 
   if (isLoadingLottery) {
     return (
-      <div className="game-card">
-        <h2>🎰 Lottery Game</h2>
+      <Card title="Lottery Game" icon="🎰" className="game-card">
         <Skeleton lines={6} />
-      </div>
+      </Card>
     );
   }
 
   if (!lotteryInfo) {
     return (
-      <div className="game-card">
-        <h2>🎰 Lottery Game</h2>
+      <Card title="Lottery Game" icon="🎰" className="game-card">
         <EmptyState
           title="Lottery data unavailable"
           description="Please refresh or reconnect your wallet."
         />
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="game-card">
-      <h2>🎰 Lottery Game</h2>
+    <Card title="Lottery Game" icon="🎰" className="game-card lottery-card">
 
       {account && (
         <div className="token-balance">
-          <p><strong>Your GT Balance:</strong> {parseFloat(tokenBalance || '0').toFixed(2)} GT</p>
+          <span className="token-balance-label">GT Balance</span>
+          <span className="token-balance-value">{parseFloat(tokenBalance || '0').toFixed(2)} GT</span>
         </div>
       )}
 
       {parseFloat(tokenBalance) === 0 && account && (
         <div className="mint-section">
           <p className="mint-info">Get 10000 GT for 0.01 ETH</p>
-          <button
-            className="button mint-button"
+          <Button
+            variant="accent"
+            fullWidth
             onClick={handleMintWithEth}
             disabled={!account || isMinting}
+            loading={isMinting}
           >
-            {isMinting ? <span className="loading"></span> : 'Get GT'}
-          </button>
+            Get GT
+          </Button>
         </div>
       )}
 
       <div className="info-box">
-        <p><strong>Lottery ID:</strong> #{lotteryInfo.id}</p>
-        <p><strong>Start Time:</strong> {lotteryInfo.startTime}</p>
-        <p><strong>End Time:</strong> {lotteryInfo.endTime}</p>
-        <p><strong>Prize Pool:</strong> {parseFloat(lotteryInfo.prizePool).toFixed(2)} GT</p>
-        <p><strong>Total Tickets:</strong> {lotteryInfo.totalTickets}</p>
-        <p><strong>Status:</strong> {lotteryInfo.isActive ? 'Active' : 'Ended'}</p>
+        <StatItem label="Lottery ID" value={`#${lotteryInfo.id}`} />
+        <StatItem label="Start Time" value={lotteryInfo.startTime} />
+        <StatItem label="End Time" value={lotteryInfo.endTime} />
+        <StatItem label="Prize Pool" value={`${parseFloat(lotteryInfo.prizePool).toFixed(2)} GT`} />
+        <StatItem label="Total Tickets" value={lotteryInfo.totalTickets} />
+        <p className="ds-stat-item"><strong>Status:</strong> <StatusTag type={lotteryInfo.isActive ? 'active' : 'ended'}>{lotteryInfo.isActive ? 'Active' : 'Ended'}</StatusTag></p>
         {lotteryInfo.isDrawn && (
           <>
-            <p><strong>Winner:</strong> {lotteryInfo.winner}</p>
-            <p><strong>Winning Number:</strong> {lotteryInfo.winningNumber}</p>
+            <StatItem label="Winner" value={lotteryInfo.winner} />
+            <StatItem label="Winning Number" value={lotteryInfo.winningNumber} />
           </>
         )}
       </div>
@@ -227,50 +254,45 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       <InlineError message={error} />
       <InlineSuccess message={success} />
 
+      <TransactionStepper
+        stage={flowStage}
+        actionLabel="Purchase"
+        approvalRequired={parseFloat(allowance) < (ticketCount * 1000)}
+      />
+
       <div className="payout-info">
-        <p><strong>Allowance:</strong> {parseFloat(allowance || '0').toFixed(4)} GT</p>
+        <StatItem label="Allowance" value={`${parseFloat(allowance || '0').toFixed(4)} GT`} />
       </div>
 
       {lotteryInfo.isActive && (
         <div className="purchase-section">
           <h3>Purchase Tickets (1 Ticket = 1000 GT)</h3>
-          <div className="input-group">
-            <label htmlFor="ticketCount">Number of Tickets:</label>
-            <input
-              type="number"
-              id="ticketCount"
-              className="input"
-              min="1"
-              max="10"
-              value={ticketCount}
-              onChange={(e) => setTicketCount(parseInt(e.target.value))}
-            />
-          </div>
+          <Input
+            type="number"
+            id="ticketCount"
+            label="Number of Tickets"
+            min="1"
+            max="10"
+            value={ticketCount}
+            onChange={(e) => setTicketCount(parseInt(e.target.value))}
+          />
           <p className="cost-info">Total Cost: {ticketCount * 1000} GT</p>
           {parseFloat(allowance) < (ticketCount * 1000) ? (
-            <button
-              className="button"
+            <Button
               onClick={handleApprove}
               disabled={!account || isApproving}
+              loading={isApproving}
             >
-              {isApproving ? (
-                <span className="loading"></span>
-              ) : (
-                'Approve Tokens'
-              )}
-            </button>
+              Approve Tokens
+            </Button>
           ) : (
-            <button
-              className="button"
+            <Button
               onClick={handlePurchase}
               disabled={!account || isPurchasing}
+              loading={isPurchasing}
             >
-              {isPurchasing ? (
-                <span className="loading"></span>
-              ) : (
-                `Purchase ${ticketCount} Ticket(s)`
-              )}
-            </button>
+              {`Purchase ${ticketCount} Ticket(s)`}
+            </Button>
           )}
         </div>
       )}
@@ -278,7 +300,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       {!account && (
         <p className="connect-prompt">Please connect your wallet to participate</p>
       )}
-    </div>
+    </Card>
   );
 };
 
