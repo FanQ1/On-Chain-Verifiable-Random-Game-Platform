@@ -2,18 +2,49 @@ import React, { useState, useEffect } from 'react';
 import WalletConnect from './components/WalletConnect';
 import LotteryGame from './components/LotteryGame';
 import DiceGame from './components/DiceGame';
+import WalletHubCard from './components/WalletHubCard';
 import './index.css';
 
+const resolveRoute = (pathname) => {
+  if (pathname === '/lottery') return 'lottery';
+  if (pathname === '/dice') return 'dice';
+  return 'home';
+};
+
+const routePathMap = {
+  home: '/',
+  lottery: '/lottery',
+  dice: '/dice'
+};
+
 function App() {
-  const [account, setAccount] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    localStorage.getItem('metaMaskAuthenticated') === 'true'
+  );
+  const [account, setAccount] = useState(localStorage.getItem('metaMaskAccount'));
   const [contracts, setContracts] = useState({
     gameToken: { address: null, abi: null },
     lottery: { address: null, abi: null },
     diceGame: { address: null, abi: null }
   });
+  const [currentRoute, setCurrentRoute] = useState(resolveRoute(window.location.pathname));
 
   useEffect(() => {
     loadContractInfo();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      window.location.href = '/login.html';
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentRoute(resolveRoute(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const loadContractInfo = async () => {
@@ -43,11 +74,96 @@ function App() {
 
   const handleConnect = (connectedAccount) => {
     setAccount(connectedAccount);
+    localStorage.setItem('metaMaskAuthenticated', 'true');
+    localStorage.setItem('metaMaskAccount', connectedAccount);
+    setIsAuthenticated(true);
   };
 
   const handleDisconnect = () => {
     setAccount(null);
+    localStorage.removeItem('metaMaskAuthenticated');
+    localStorage.removeItem('metaMaskAccount');
+    setIsAuthenticated(false);
+    window.location.href = '/login.html';
   };
+
+  const navigateTo = (routeKey) => {
+    const nextPath = routePathMap[routeKey] || '/';
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setCurrentRoute(routeKey);
+  };
+
+  const renderGameViews = () => {
+    if (currentRoute === 'lottery') {
+      return (
+        <section className="game-container single-game-container">
+          {contracts.lottery.address && contracts.lottery.abi && (
+            <LotteryGame
+              account={account}
+              contractAddress={contracts.lottery.address}
+              abi={contracts.lottery.abi}
+              gameTokenAddress={contracts.gameToken.address}
+              gameTokenAbi={contracts.gameToken.abi}
+              onToggleView={() => navigateTo('home')}
+              toggleLabel="Return"
+            />
+          )}
+        </section>
+      );
+    }
+
+    if (currentRoute === 'dice') {
+      return (
+        <section className="game-container single-game-container">
+          {contracts.diceGame.address && contracts.diceGame.abi && (
+            <DiceGame
+              account={account}
+              contractAddress={contracts.diceGame.address}
+              abi={contracts.diceGame.abi}
+              gameTokenAddress={contracts.gameToken.address}
+              gameTokenAbi={contracts.gameToken.abi}
+              onToggleView={() => navigateTo('home')}
+              toggleLabel="Return"
+            />
+          )}
+        </section>
+      );
+    }
+
+    return (
+      <section className="game-container">
+        {contracts.lottery.address && contracts.lottery.abi && (
+          <LotteryGame
+            account={account}
+            contractAddress={contracts.lottery.address}
+            abi={contracts.lottery.abi}
+            gameTokenAddress={contracts.gameToken.address}
+            gameTokenAbi={contracts.gameToken.abi}
+            onToggleView={() => navigateTo('lottery')}
+            toggleLabel="Lottery Game"
+          />
+        )}
+
+        {contracts.diceGame.address && contracts.diceGame.abi && (
+          <DiceGame
+            account={account}
+            contractAddress={contracts.diceGame.address}
+            abi={contracts.diceGame.abi}
+            gameTokenAddress={contracts.gameToken.address}
+            gameTokenAbi={contracts.gameToken.abi}
+            onToggleView={() => navigateTo('dice')}
+            toggleLabel="Dice Game"
+          />
+        )}
+      </section>
+    );
+  };
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="App">
@@ -64,28 +180,15 @@ function App() {
         </header>
 
         <main className="app-main">
-          <section className="game-container">
-            {contracts.lottery.address && contracts.lottery.abi && (
-              <LotteryGame
-                account={account}
-                contractAddress={contracts.lottery.address}
-                abi={contracts.lottery.abi}
-                gameTokenAddress={contracts.gameToken.address}
-                gameTokenAbi={contracts.gameToken.abi}
-              />
-            )}
+          <WalletHubCard
+            account={account}
+            gameTokenAddress={contracts.gameToken.address}
+            gameTokenAbi={contracts.gameToken.abi}
+          />
 
-            {contracts.diceGame.address && contracts.diceGame.abi && (
-              <DiceGame
-                account={account}
-                contractAddress={contracts.diceGame.address}
-                abi={contracts.diceGame.abi}
-                gameTokenAddress={contracts.gameToken.address}
-                gameTokenAbi={contracts.gameToken.abi}
-              />
-            )}
-          </section>
+          {renderGameViews()}
 
+          {currentRoute === 'home' && (
           <section className="info-section">
             <h2 className="section-title">Platform Guide</h2>
             <div className="info-box">
@@ -125,6 +228,7 @@ function App() {
               </ol>
             </div>
           </section>
+          )}
         </main>
       </div>
     </div>

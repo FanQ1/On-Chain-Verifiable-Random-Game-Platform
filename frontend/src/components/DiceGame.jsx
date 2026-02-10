@@ -10,24 +10,37 @@ import Input from './ui/Input';
 import StatItem from './ui/StatItem';
 import StatusTag from './ui/StatusTag';
 import TransactionStepper from './ui/TransactionStepper';
+import { getFriendlyError } from '../utils/friendlyError';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 
-const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
+const DiceGame = ({
+  account,
+  contractAddress,
+  abi,
+  gameTokenAddress,
+  gameTokenAbi,
+  onToggleView,
+  toggleLabel = 'Dice Game'
+}) => {
   const [betAmount, setBetAmount] = useState('1');
   const [prediction, setPrediction] = useState(50);
   const [potentialPayout, setPotentialPayout] = useState('0');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const [isMinting, setIsMinting] = useState(false);
   const [gameHistory, setGameHistory] = useState([]);
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('all');
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [contract, setContract] = useState(null);
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
-  const [tokenBalance, setTokenBalance] = useState('0');
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [flowStage, setFlowStage] = useState('idle');
   const { showToast } = useToast();
+
+  useAutoDismiss(error, setError, null);
+  useAutoDismiss(success, setSuccess, null);
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -42,7 +55,6 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       const gameToken = new ethers.Contract(gameTokenAddress, gameTokenAbi, provider);
       setGameTokenContract(gameToken);
       loadAllowance(gameToken);
-      loadTokenBalance(gameToken);
     }
   }, [account, contractAddress, abi, gameTokenAddress, gameTokenAbi]);
 
@@ -76,7 +88,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       setPotentialPayout(ethers.formatEther(payoutString));
     } catch (error) {
       console.error('Error calculating payout:', error);
-      setError('Error calculating payout: ' + error.message);
+      setError(getFriendlyError(error, 'Payout calculation failed. Please check your input and try again.'));
     }
   };
 
@@ -91,23 +103,13 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
     }
   };
 
-  const loadTokenBalance = async (gameToken) => {
-    if (!account) return;
-    try {
-      const balance = await gameToken.balanceOf(account);
-      setTokenBalance(ethers.formatEther(balance.toString()));
-    } catch (error) {
-      console.error('Error loading token balance:', error);
-    }
-  };
-
   const loadGameHistory = async (diceGameContract) => {
     if (!account) return;
     setIsLoadingHistory(true);
     try {
       const games = await diceGameContract.getPlayerGames(account);
       const gameDetails = await Promise.all(
-        games.slice(-5).map(async (gameId) => {
+        games.map(async (gameId) => {
           const game = await diceGameContract.getGame(gameId);
           return {
             id: gameId.toString(),
@@ -125,35 +127,6 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       showToast('Failed to load game history', 'error');
     } finally {
       setIsLoadingHistory(false);
-    }
-  };
-
-  const handleMintWithEth = async () => {
-    if (!gameTokenContract || !account) return;
-
-    setIsMinting(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
-      const tokenWithSigner = gameTokenContract.connect(signer);
-
-      const mintAmount = ethers.parseEther('10000');
-      const fee = ethers.parseEther('0.01');
-
-      const tx = await tokenWithSigner.mintWithEth(mintAmount, { value: fee });
-      await tx.wait();
-
-      setSuccess('Successfully got 10000 GT!');
-      showToast('Successfully got 10000 GT', 'success');
-      await loadTokenBalance(gameTokenContract);
-    } catch (error) {
-      console.error('Error minting tokens:', error);
-      setError(error.message || 'Failed to get GT');
-      showToast('Failed to get GT', 'error');
-    } finally {
-      setIsMinting(false);
     }
   };
 
@@ -181,9 +154,10 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       await loadAllowance(gameTokenContract);
     } catch (error) {
       console.error('Error approving tokens:', error);
-      setError(error.message || 'Failed to approve tokens');
+      const message = getFriendlyError(error, 'Approval failed. Please try again.');
+      setError(message);
       setFlowStage('error');
-      showToast('Approval failed', 'error');
+      showToast(message, 'error');
     } finally {
       setIsApproving(false);
     }
@@ -244,9 +218,10 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       await loadGameHistory(contract);
     } catch (error) {
       console.error('Error starting game:', error);
-      setError(error.message || 'Failed to start game');
+      const message = getFriendlyError(error, 'Failed to start game. Please try again.');
+      setError(message);
       setFlowStage('error');
-      showToast('Failed to start game', 'error');
+      showToast(message, 'error');
     } finally {
       setIsPlaying(false);
     }
@@ -259,113 +234,161 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
     return 'done';
   };
 
+  const displayedHistory = showAllHistory ? gameHistory : gameHistory.slice(0, 3);
+  const getHistoryCategory = (game) => {
+    if (!game.isCompleted || parseInt(game.rollResult, 10) === 0) return 'waiting';
+    return parseFloat(game.payout) > 0 ? 'won' : 'lost';
+  };
+  const filteredHistory = showAllHistory
+    ? displayedHistory.filter((game) => {
+      if (historyFilter === 'all') return true;
+      return getHistoryCategory(game) === historyFilter;
+    })
+    : displayedHistory;
+
+  const renderHeaderActions = () => (
+    <>
+      <button type="button" className="card-link-btn" onClick={onToggleView}>
+        {toggleLabel}
+      </button>
+      <button
+        type="button"
+        className="card-link-btn"
+        onClick={() => {
+          setShowAllHistory((prev) => !prev);
+          setHistoryFilter('all');
+        }}
+      >
+        {showAllHistory ? 'Bet' : 'Games History'}
+      </button>
+    </>
+  );
+
   return (
-    <Card title="Dice Game" icon="🎲" className="game-card dice-card">
-
-      {account && (
-        <div className="token-balance">
-          <span className="token-balance-label">GT Balance</span>
-          <span className="token-balance-value">{parseFloat(tokenBalance || '0').toFixed(2)} GT</span>
-        </div>
-      )}
-
-      {parseFloat(tokenBalance) === 0 && account && (
-        <div className="mint-section">
-          <p className="mint-info">Get 10000 GT for 0.01 ETH</p>
-          <Button
-            variant="accent"
-            fullWidth
-            onClick={handleMintWithEth}
-            disabled={!account || isMinting}
-            loading={isMinting}
-          >
-            Get GT
-          </Button>
-        </div>
-      )}
-
-      <div className="info-box">
-        <p><strong>Rules:</strong></p>
-        <ul>
-          <li>Predict a number between 1 and 100</li>
-          <li>If the dice roll is less than or equal to your prediction, you win!</li>
-          <li>Higher predictions = Lower multiplier, Higher chance</li>
-          <li>Lower predictions = Higher multiplier, Lower chance</li>
-          <li>House edge: 3%</li>
-        </ul>
-      </div>
-
-      <div className="game-controls">
-        <Input
-          type="number"
-          id="betAmount"
-          label="Bet Amount (GT)"
-          min="0.001"
-          max="10"
-          step="0.001"
-          value={betAmount}
-          onChange={(e) => setBetAmount(e.target.value)}
-        />
-
-        <div className="input-group">
-          <label htmlFor="prediction">Prediction (1-100):</label>
-          <input
-            type="range"
-            id="prediction"
-            className="input"
-            min="1"
-            max="100"
-            value={prediction}
-            onChange={(e) => setPrediction(parseInt(e.target.value))}
-          />
-          <div className="prediction-value">
-            <span className="prediction-number">{prediction}</span>
-            <span className="win-chance">
-              Win Chance: {prediction}%
-            </span>
+    <Card
+      title="Dice Game"
+      icon="🎲"
+      className="game-card dice-card"
+      headerActions={renderHeaderActions()}
+    >
+      {!showAllHistory && (
+        <>
+          <div className="info-box">
+            <p><strong>Rules:</strong></p>
+            <ul>
+              <li>Predict a number between 1 and 100</li>
+              <li>If the dice roll is less than or equal to your prediction, you win!</li>
+              <li>Higher predictions = Lower multiplier, Higher chance</li>
+              <li>Lower predictions = Higher multiplier, Lower chance</li>
+              <li>House edge: 3%</li>
+            </ul>
           </div>
-        </div>
 
-        <div className="payout-info">
-          <StatItem label="Potential Payout" value={`${parseFloat(potentialPayout || '0').toFixed(4)} GT`} />
-          <StatItem label="Multiplier" value={`${parseFloat(betAmount || '1') > 0 ? (parseFloat(potentialPayout || '0') / parseFloat(betAmount || '1')).toFixed(2) : '0.00'}x`} />
-          <StatItem label="Allowance" value={`${parseFloat(allowance || '0').toFixed(4)} GT`} />
-        </div>
+          <div className="game-controls">
+            <Input
+              type="number"
+              id="betAmount"
+              label="Bet Amount (GT)"
+              min="0.001"
+              max="10"
+              step="0.001"
+              value={betAmount}
+              onChange={(e) => setBetAmount(e.target.value)}
+            />
 
-        <InlineError message={error} />
-        <InlineSuccess message={success} />
+            <div className="input-group">
+              <label htmlFor="prediction">Prediction (1-100):</label>
+              <input
+                type="range"
+                id="prediction"
+                className="input"
+                min="1"
+                max="100"
+                value={prediction}
+                onChange={(e) => setPrediction(parseInt(e.target.value))}
+              />
+              <div className="prediction-value">
+                <span className="prediction-number">{prediction}</span>
+                <span className="win-chance">
+                  Win Chance: {prediction}%
+                </span>
+              </div>
+            </div>
 
-        <TransactionStepper
-          stage={flowStage}
-          actionLabel="Play"
-          approvalRequired={parseFloat(allowance) < parseFloat(betAmount || '0')}
-        />
+            <div className="payout-info">
+              <StatItem label="Potential Payout" value={`${parseFloat(potentialPayout || '0').toFixed(4)} GT`} />
+              <StatItem label="Multiplier" value={`${parseFloat(betAmount || '1') > 0 ? (parseFloat(potentialPayout || '0') / parseFloat(betAmount || '1')).toFixed(2) : '0.00'}x`} />
+              <StatItem label="Allowance" value={`${parseFloat(allowance || '0').toFixed(4)} GT`} />
+            </div>
 
-        {parseFloat(allowance) < parseFloat(betAmount) ? (
-          <Button
-            onClick={handleApprove}
-            disabled={!account || isApproving}
-            loading={isApproving}
-          >
-            Approve Tokens
-          </Button>
-        ) : (
-          <Button
-            onClick={handlePlay}
-            disabled={!account || isPlaying}
-            loading={isPlaying}
-          >
-            Roll Dice
-          </Button>
-        )}
+            <InlineError message={error} />
+            <InlineSuccess message={success} />
 
-        {!account && (
-          <p className="connect-prompt">Please connect your wallet to play</p>
-        )}
-      </div>
+            <TransactionStepper
+              stage={flowStage}
+              actionLabel="Play"
+              approvalRequired={parseFloat(allowance) < parseFloat(betAmount || '0')}
+            />
+
+            {parseFloat(allowance) < parseFloat(betAmount) ? (
+              <Button
+                onClick={handleApprove}
+                disabled={!account || isApproving}
+                loading={isApproving}
+              >
+                Approve Tokens
+              </Button>
+            ) : (
+              <Button
+                onClick={handlePlay}
+                disabled={!account || isPlaying}
+                loading={isPlaying}
+              >
+                Roll Dice
+              </Button>
+            )}
+
+            {!account && (
+              <p className="connect-prompt">Please connect your wallet to play</p>
+            )}
+          </div>
+        </>
+      )}
 
       <div className="game-history">
-        <h3>Recent Games</h3>
+        {!showAllHistory && <h3>Recent Games</h3>}
+        {showAllHistory && (
+          <div className="history-filter-row">
+            <button
+              type="button"
+              className={`card-link-btn history-filter-btn ${historyFilter === 'all' ? 'history-filter-active' : ''}`}
+              onClick={() => setHistoryFilter('all')}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              className={`card-link-btn history-filter-btn ${historyFilter === 'won' ? 'history-filter-active' : ''}`}
+              onClick={() => setHistoryFilter('won')}
+            >
+              Won
+            </button>
+            <button
+              type="button"
+              className={`card-link-btn history-filter-btn ${historyFilter === 'lost' ? 'history-filter-active' : ''}`}
+              onClick={() => setHistoryFilter('lost')}
+            >
+              Lost
+            </button>
+            <button
+              type="button"
+              className={`card-link-btn history-filter-btn ${historyFilter === 'waiting' ? 'history-filter-active' : ''}`}
+              onClick={() => setHistoryFilter('waiting')}
+            >
+              Waiting for result...
+            </button>
+          </div>
+        )}
         {isLoadingHistory ? (
           <Skeleton lines={4} />
         ) : gameHistory.length === 0 ? (
@@ -375,7 +398,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
           />
         ) : (
           <div className="history-list">
-            {gameHistory.map((game) => (
+            {filteredHistory.map((game) => (
               <div key={game.id} className="history-item">
                 <p><strong>Game #{game.id}</strong></p>
                 <div className="history-status-box">
@@ -410,6 +433,12 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
                 </div>
               </div>
             ))}
+            {filteredHistory.length === 0 && (
+              <EmptyState
+                title="No matching games"
+                description="Try another filter."
+              />
+            )}
           </div>
         )}
       </div>

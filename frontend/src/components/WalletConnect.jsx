@@ -3,6 +3,8 @@ import { ethers } from 'ethers';
 import { InlineError } from './ui/InlineStatus';
 import { useToast } from './ui/ToastProvider';
 import Button from './ui/Button';
+import { getFriendlyError } from '../utils/friendlyError';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 
 const WalletConnect = ({ onConnect, onDisconnect }) => {
   const [account, setAccount] = useState(null);
@@ -10,6 +12,8 @@ const WalletConnect = ({ onConnect, onDisconnect }) => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [walletError, setWalletError] = useState(null);
   const { showToast } = useToast();
+
+  useAutoDismiss(walletError, setWalletError, null);
 
   useEffect(() => {
     checkConnection();
@@ -79,8 +83,9 @@ const WalletConnect = ({ onConnect, onDisconnect }) => {
       showToast('Wallet connected', 'success');
     } catch (error) {
       console.error('Error connecting wallet:', error);
-      setWalletError('Failed to connect wallet. Please try again.');
-      showToast('Wallet connection failed', 'error');
+      const message = getFriendlyError(error, 'Wallet connection failed. Please try again.');
+      setWalletError(message);
+      showToast(message, 'error');
     } finally {
       setIsConnecting(false);
     }

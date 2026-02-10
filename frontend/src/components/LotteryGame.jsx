@@ -10,22 +10,33 @@ import Input from './ui/Input';
 import StatItem from './ui/StatItem';
 import StatusTag from './ui/StatusTag';
 import TransactionStepper from './ui/TransactionStepper';
+import { getFriendlyError } from '../utils/friendlyError';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 
-const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
+const LotteryGame = ({
+  account,
+  contractAddress,
+  abi,
+  gameTokenAddress,
+  gameTokenAbi,
+  onToggleView,
+  toggleLabel = 'Lottery Game'
+}) => {
   const [lotteryInfo, setLotteryInfo] = useState(null);
   const [isLoadingLottery, setIsLoadingLottery] = useState(true);
   const [ticketCount, setTicketCount] = useState(1);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const [isMinting, setIsMinting] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [contract, setContract] = useState(null);
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
-  const [tokenBalance, setTokenBalance] = useState('0');
   const [flowStage, setFlowStage] = useState('idle');
   const { showToast } = useToast();
+
+  useAutoDismiss(error, setError, null);
+  useAutoDismiss(success, setSuccess, null);
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -39,7 +50,6 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       const gameToken = new ethers.Contract(gameTokenAddress, gameTokenAbi, provider);
       setGameTokenContract(gameToken);
       loadAllowance(gameToken);
-      loadTokenBalance(gameToken);
     }
   }, [account, contractAddress, abi, gameTokenAddress, gameTokenAbi]);
 
@@ -104,9 +114,10 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
         await loadAllowance(gameTokenContract);
       } catch (error) {
         console.error('Error approving tokens:', error);
-        setError(error.message || 'Failed to approve tokens');
+        const message = getFriendlyError(error, 'Approval failed. Please try again.');
+        setError(message);
         setFlowStage('error');
-        showToast('Approval failed', 'error');
+        showToast(message, 'error');
       } finally {
         setIsApproving(false);
       }
@@ -122,45 +133,6 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
         console.error('Error loading allowance:', error);
       }
     };
-
-  const loadTokenBalance = async (gameToken) => {
-    if (!account) return;
-    try {
-      const balance = await gameToken.balanceOf(account);
-      setTokenBalance(ethers.formatEther(balance.toString()));
-    } catch (error) {
-      console.error('Error loading token balance:', error);
-    }
-  };
-
-  const handleMintWithEth = async () => {
-    if (!gameTokenContract || !account) return;
-
-    setIsMinting(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
-      const tokenWithSigner = gameTokenContract.connect(signer);
-
-      const mintAmount = ethers.parseEther('10000');
-      const fee = ethers.parseEther('0.01');
-
-      const tx = await tokenWithSigner.mintWithEth(mintAmount, { value: fee });
-      await tx.wait();
-
-      setSuccess('Successfully got 10000 GT!');
-      showToast('Successfully got 10000 GT', 'success');
-      await loadTokenBalance(gameTokenContract);
-    } catch (error) {
-      console.error('Error minting tokens:', error);
-      setError(error.message || 'Failed to get GT');
-      showToast('Failed to get GT', 'error');
-    } finally {
-      setIsMinting(false);
-    }
-  };
 
   const handlePurchase = async () => {
     if (!contract || !account) return;
@@ -184,17 +156,24 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       await loadLotteryInfo(contract);
     } catch (error) {
       console.error('Error purchasing tickets:', error);
-      setError(error.message || 'Failed to purchase tickets');
+      const message = getFriendlyError(error, 'Ticket purchase failed. Please try again.');
+      setError(message);
       setFlowStage('error');
-      showToast('Ticket purchase failed', 'error');
+      showToast(message, 'error');
     } finally {
       setIsPurchasing(false);
     }
   };
 
+  const renderHeaderActions = () => (
+    <button type="button" className="card-link-btn" onClick={onToggleView}>
+      {toggleLabel}
+    </button>
+  );
+
   if (isLoadingLottery) {
     return (
-      <Card title="Lottery Game" icon="🎰" className="game-card">
+      <Card title="Lottery Game" icon="🎰" className="game-card" headerActions={renderHeaderActions()}>
         <Skeleton lines={6} />
       </Card>
     );
@@ -202,7 +181,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
 
   if (!lotteryInfo) {
     return (
-      <Card title="Lottery Game" icon="🎰" className="game-card">
+      <Card title="Lottery Game" icon="🎰" className="game-card" headerActions={renderHeaderActions()}>
         <EmptyState
           title="Lottery data unavailable"
           description="Please refresh or reconnect your wallet."
@@ -212,30 +191,12 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
   }
 
   return (
-    <Card title="Lottery Game" icon="🎰" className="game-card lottery-card">
-
-      {account && (
-        <div className="token-balance">
-          <span className="token-balance-label">GT Balance</span>
-          <span className="token-balance-value">{parseFloat(tokenBalance || '0').toFixed(2)} GT</span>
-        </div>
-      )}
-
-      {parseFloat(tokenBalance) === 0 && account && (
-        <div className="mint-section">
-          <p className="mint-info">Get 10000 GT for 0.01 ETH</p>
-          <Button
-            variant="accent"
-            fullWidth
-            onClick={handleMintWithEth}
-            disabled={!account || isMinting}
-            loading={isMinting}
-          >
-            Get GT
-          </Button>
-        </div>
-      )}
-
+    <Card
+      title="Lottery Game"
+      icon="🎰"
+      className="game-card lottery-card"
+      headerActions={renderHeaderActions()}
+    >
       <div className="info-box">
         <StatItem label="Lottery ID" value={`#${lotteryInfo.id}`} />
         <StatItem label="Start Time" value={lotteryInfo.startTime} />

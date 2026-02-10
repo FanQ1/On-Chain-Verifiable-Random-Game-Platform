@@ -409,7 +409,41 @@ code {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  margin: 0;
+}
+
+.ds-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
   margin-bottom: var(--space-4);
+}
+
+.ds-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.card-link-btn {
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 999px;
+  background: rgba(0, 229, 255, 0.12);
+  color: #ccf6ff;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background var(--duration-fast), border-color var(--duration-fast), transform var(--duration-fast);
+}
+
+.card-link-btn:hover {
+  background: rgba(0, 229, 255, 0.22);
+  border-color: rgba(0, 229, 255, 0.7);
+  transform: translateY(-1px);
 }
 
 .ds-button {
@@ -683,6 +717,34 @@ code {
   gap: var(--space-6);
 }
 
+.wallet-hub-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.wallet-hub-card h2 {
+  margin-bottom: 0;
+}
+
+.wallet-hub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.wallet-hub-actions {
+  display: grid;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.wallet-hub-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
 .brand-block h1 {
   margin-bottom: var(--space-1);
 }
@@ -785,6 +847,23 @@ code {
   gap: var(--space-3);
 }
 
+.history-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.history-filter-btn {
+  font-size: 12px;
+}
+
+.history-filter-active {
+  background: rgba(0, 229, 255, 0.28);
+  border-color: rgba(0, 229, 255, 0.88);
+  color: #ffffff;
+}
+
 .history-item {
   padding: var(--space-3);
   border-radius: var(--radius-md);
@@ -796,6 +875,21 @@ code {
 .ds-card-title {
   padding-bottom: var(--space-2);
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.single-game-container {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.single-game-container .dice-card {
+  height: auto;
+  overflow: visible;
+  padding-right: var(--space-5);
+}
+
+.single-game-container .dice-card:hover,
+.single-game-container .dice-card:focus-within {
+  overflow: visible;
 }
 
 .game-card {
@@ -988,4 +1082,17 @@ code {
   .history-meta-grid {
     grid-template-columns: 1fr;
   }
+
+  .wallet-hub-card {
+    padding: var(--space-4);
+  }
+
+  .wallet-hub-header {
+    flex-wrap: wrap;
+  }
+
+  .wallet-hub-tier-grid {
+    grid-template-columns: 1fr;
+  }
+
 }
