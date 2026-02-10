@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { InlineError, InlineSuccess } from './ui/InlineStatus';
+import Skeleton from './ui/Skeleton';
+import EmptyState from './ui/EmptyState';
+import { useToast } from './ui/ToastProvider';
 
 const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
   const [lotteryInfo, setLotteryInfo] = useState(null);
+  const [isLoadingLottery, setIsLoadingLottery] = useState(true);
   const [ticketCount, setTicketCount] = useState(1);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
@@ -13,6 +18,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
   const [tokenBalance, setTokenBalance] = useState('0');
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -32,6 +38,7 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
 
   const loadLotteryInfo = async (lotteryContract) => {
     try {
+      setIsLoadingLottery(true);
       const currentLotteryId = await lotteryContract.currentLotteryId();
       const info = await lotteryContract.getLotteryInfo(currentLotteryId);
       setLotteryInfo({
@@ -48,6 +55,9 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
     } catch (error) {
       console.error('Error loading lottery info:', error);
       setError('Failed to load lottery information');
+      showToast('Failed to load lottery information', 'error');
+    } finally {
+      setIsLoadingLottery(false);
     }
   };
 
@@ -68,10 +78,12 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
         await tx.wait();
   
         setSuccess('Approval successful! You can now play the game.');
+        showToast('Approval successful', 'success');
         await loadAllowance(gameTokenContract);
       } catch (error) {
         console.error('Error approving tokens:', error);
         setError(error.message || 'Failed to approve tokens');
+        showToast('Approval failed', 'error');
       } finally {
         setIsApproving(false);
       }
@@ -116,10 +128,12 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       await tx.wait();
 
       setSuccess('Successfully got 10000 GT!');
+      showToast('Successfully got 10000 GT', 'success');
       await loadTokenBalance(gameTokenContract);
     } catch (error) {
       console.error('Error minting tokens:', error);
       setError(error.message || 'Failed to get GT');
+      showToast('Failed to get GT', 'error');
     } finally {
       setIsMinting(false);
     }
@@ -140,17 +154,36 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
       await tx.wait();
 
       setSuccess(`Successfully purchased ${ticketCount} ticket(s)!`);
+      showToast(`Purchased ${ticketCount} ticket(s)`, 'success');
       await loadLotteryInfo(contract);
     } catch (error) {
       console.error('Error purchasing tickets:', error);
       setError(error.message || 'Failed to purchase tickets');
+      showToast('Ticket purchase failed', 'error');
     } finally {
       setIsPurchasing(false);
     }
   };
 
+  if (isLoadingLottery) {
+    return (
+      <div className="game-card">
+        <h2>🎰 Lottery Game</h2>
+        <Skeleton lines={6} />
+      </div>
+    );
+  }
+
   if (!lotteryInfo) {
-    return <div className="loading-container">Loading lottery information...</div>;
+    return (
+      <div className="game-card">
+        <h2>🎰 Lottery Game</h2>
+        <EmptyState
+          title="Lottery data unavailable"
+          description="Please refresh or reconnect your wallet."
+        />
+      </div>
+    );
   }
 
   return (
@@ -191,8 +224,8 @@ const LotteryGame = ({ account, contractAddress, abi, gameTokenAddress, gameToke
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
-      {success && <div className="success">{success}</div>}
+      <InlineError message={error} />
+      <InlineSuccess message={success} />
 
       <div className="payout-info">
         <p><strong>Allowance:</strong> {parseFloat(allowance || '0').toFixed(4)} GT</p>

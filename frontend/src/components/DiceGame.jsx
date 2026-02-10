@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { InlineError, InlineSuccess } from './ui/InlineStatus';
+import Skeleton from './ui/Skeleton';
+import EmptyState from './ui/EmptyState';
+import { useToast } from './ui/ToastProvider';
 
 const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAbi }) => {
   const [betAmount, setBetAmount] = useState('1');
@@ -15,6 +19,8 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
   const [tokenBalance, setTokenBalance] = useState('0');
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (window.ethereum && account && contractAddress && abi) {
@@ -79,6 +85,7 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
 
   const loadGameHistory = async (diceGameContract) => {
     if (!account) return;
+    setIsLoadingHistory(true);
     try {
       const games = await diceGameContract.getPlayerGames(account);
       const gameDetails = await Promise.all(
@@ -97,6 +104,9 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       setGameHistory(gameDetails.reverse());
     } catch (error) {
       console.error('Error loading game history:', error);
+      showToast('Failed to load game history', 'error');
+    } finally {
+      setIsLoadingHistory(false);
     }
   };
 
@@ -118,10 +128,12 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       await tx.wait();
 
       setSuccess('Successfully got 10000 GT!');
+      showToast('Successfully got 10000 GT', 'success');
       await loadTokenBalance(gameTokenContract);
     } catch (error) {
       console.error('Error minting tokens:', error);
       setError(error.message || 'Failed to get GT');
+      showToast('Failed to get GT', 'error');
     } finally {
       setIsMinting(false);
     }
@@ -144,10 +156,12 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       await tx.wait();
 
       setSuccess('Approval successful! You can now play the game.');
+      showToast('Approval successful', 'success');
       await loadAllowance(gameTokenContract);
     } catch (error) {
       console.error('Error approving tokens:', error);
       setError(error.message || 'Failed to approve tokens');
+      showToast('Approval failed', 'error');
     } finally {
       setIsApproving(false);
     }
@@ -201,10 +215,12 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
       }
 
       setSuccess('Game completed!');
+      showToast('Game completed', 'success');
       await loadGameHistory(contract);
     } catch (error) {
       console.error('Error starting game:', error);
       setError(error.message || 'Failed to start game');
+      showToast('Failed to start game', 'error');
     } finally {
       setIsPlaying(false);
     }
@@ -284,8 +300,8 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
           <p><strong>Allowance:</strong> {parseFloat(allowance || '0').toFixed(4)} GT</p>
         </div>
 
-        {error && <div className="error">{error}</div>}
-        {success && <div className="success">{success}</div>}
+        <InlineError message={error} />
+        <InlineSuccess message={success} />
 
         {parseFloat(allowance) < parseFloat(betAmount) ? (
           <button
@@ -318,9 +334,16 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
         )}
       </div>
 
-      {gameHistory.length > 0 && (
-        <div className="game-history">
-          <h3>Recent Games</h3>
+      <div className="game-history">
+        <h3>Recent Games</h3>
+        {isLoadingHistory ? (
+          <Skeleton lines={4} />
+        ) : gameHistory.length === 0 ? (
+          <EmptyState
+            title="No games yet"
+            description="Play your first round to see game history."
+          />
+        ) : (
           <div className="history-list">
             {gameHistory.map((game) => (
               <div key={game.id} className="history-item">
@@ -332,16 +355,16 @@ const DiceGame = ({ account, contractAddress, abi, gameTokenAddress, gameTokenAb
                 ) : (
                   <>
                     <p>Roll: {game.rollResult}</p>
-                    <p>Result: {parseFloat(game.payout) > 0 ? 
-                      `Won ${parseFloat(game.payout).toFixed(4)} GT` : 
+                    <p>Result: {parseFloat(game.payout) > 0 ?
+                      `Won ${parseFloat(game.payout).toFixed(4)} GT` :
                       'Lost'}</p>
                   </>
                 )}
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

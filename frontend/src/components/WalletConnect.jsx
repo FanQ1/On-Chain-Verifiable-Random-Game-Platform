@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { InlineError } from './ui/InlineStatus';
+import { useToast } from './ui/ToastProvider';
 
 const WalletConnect = ({ onConnect, onDisconnect }) => {
   const [account, setAccount] = useState(null);
   const [balance, setBalance] = useState('0');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [walletError, setWalletError] = useState(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     checkConnection();
@@ -57,10 +61,12 @@ const WalletConnect = ({ onConnect, onDisconnect }) => {
 
   const connect = async () => {
     if (!window.ethereum) {
-      alert('Please install MetaMask to use this application');
+      setWalletError('MetaMask not detected. Please install it to continue.');
+      showToast('MetaMask not detected', 'error');
       return;
     }
 
+    setWalletError(null);
     setIsConnecting(true);
     try {
       const accounts = await window.ethereum.request({
@@ -69,9 +75,11 @@ const WalletConnect = ({ onConnect, onDisconnect }) => {
       setAccount(accounts[0]);
       await updateBalance(accounts[0]);
       if (onConnect) onConnect(accounts[0]);
+      showToast('Wallet connected', 'success');
     } catch (error) {
       console.error('Error connecting wallet:', error);
-      alert('Failed to connect wallet. Please try again.');
+      setWalletError('Failed to connect wallet. Please try again.');
+      showToast('Wallet connection failed', 'error');
     } finally {
       setIsConnecting(false);
     }
@@ -80,11 +88,14 @@ const WalletConnect = ({ onConnect, onDisconnect }) => {
   const disconnect = () => {
     setAccount(null);
     setBalance('0');
+    setWalletError(null);
     if (onDisconnect) onDisconnect();
+    showToast('Wallet disconnected', 'info');
   };
 
   return (
     <div className="wallet-connect">
+      <InlineError message={walletError} />
       {account ? (
         <div className="wallet-info">
           <div className="account">
