@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { InlineError, InlineSuccess } from './ui/InlineStatus';
 import Skeleton from './ui/Skeleton';
@@ -22,6 +22,8 @@ const DiceGame = ({
   onToggleView,
   toggleLabel = 'Dice Game'
 }) => {
+  const LOCAL_VRF_COORDINATOR = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
+  const AUTO_RETRY_INTERVAL_MS = 8000;
   const [betAmount, setBetAmount] = useState('1');
   const [prediction, setPrediction] = useState(50);
   const [potentialPayout, setPotentialPayout] = useState('0');
@@ -35,8 +37,23 @@ const DiceGame = ({
   const [contract, setContract] = useState(null);
   const [gameTokenContract, setGameTokenContract] = useState(null);
   const [allowance, setAllowance] = useState('0');
+  const [requestIdByGameId, setRequestIdByGameId] = useState({});
+  const [isRetryingFulfill, setIsRetryingFulfill] = useState(false);
+  const [lastFulfillRetryAt, setLastFulfillRetryAt] = useState(0);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [flowStage, setFlowStage] = useState('idle');
+  const [resultModal, setResultModal] = useState({
+    isOpen: false,
+    isRevealing: false,
+    progressMs: 1000,
+    won: false,
+    gameId: '',
+    rollResult: '',
+    payout: '0'
+  });
+  const isHistoryInitializedRef = useRef(false);
+  const notifiedGameIdsRef = useRef(new Set());
+  const revealTimerRef = useRef(null);
   const { showToast } = useToast();
 
   useAutoDismiss(error, setError, null);
@@ -73,6 +90,126 @@ const DiceGame = ({
     }
   }, [account, allowance, betAmount, isApproving, isPlaying]);
 
+  useEffect(() => {
+    if (!contract || !account) return undefined;
+
+    const hasPendingGame = gameHistory.some(
+      (game) => !game.isCompleted || parseInt(game.rollResult, 10) === 0
+    );
+    if (!hasPendingGame) return undefined;
+
+    const intervalId = setInterval(() => {
+      loadGameHistory(contract);
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [contract, account, gameHistory]);
+
+  useEffect(() => {
+    if (!contract || !account) return;
+    loadRequestIdMap(contract);
+  }, [contract, account]);
+
+  useEffect(() => {
+    const autoRetryFulfill = async () => {
+      if (!window.ethereum || !contract || !account || isPlaying || isRetryingFulfill) return;
+
+      const pendingGame = gameHistory.find(
+        (game) => !game.isCompleted || parseInt(game.rollResult, 10) === 0
+      );
+      if (!pendingGame) return;
+
+      const requestId = requestIdByGameId[pendingGame.id];
+      if (!requestId) {
+        await loadRequestIdMap(contract);
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastFulfillRetryAt < AUTO_RETRY_INTERVAL_MS) return;
+
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const network = await provider.getNetwork();
+        const isLocalNetwork = Number(network.chainId) === 31337 || Number(network.chainId) === 1337;
+        if (!isLocalNetwork) return;
+
+        setIsRetryingFulfill(true);
+        setLastFulfillRetryAt(now);
+
+        const signer = await provider.getSigner();
+        const vrfCoordinatorAbi = ['function fulfillRandomWords(uint256 requestId) external'];
+        const vrfCoordinator = new ethers.Contract(LOCAL_VRF_COORDINATOR, vrfCoordinatorAbi, signer);
+        const tx = await vrfCoordinator.fulfillRandomWords(requestId);
+        await tx.wait();
+
+        await loadGameHistory(contract);
+      } catch (error) {
+        console.warn('Auto retry fulfill failed:', error);
+      } finally {
+        setIsRetryingFulfill(false);
+      }
+    };
+
+    autoRetryFulfill();
+  }, [
+    contract,
+    account,
+    gameHistory,
+    requestIdByGameId,
+    isPlaying,
+    isRetryingFulfill,
+    lastFulfillRetryAt
+  ]);
+
+  useEffect(() => {
+    if (!gameHistory.length) return;
+
+    if (!isHistoryInitializedRef.current) {
+      gameHistory.forEach((game) => {
+        if (game.isCompleted && parseInt(game.rollResult, 10) > 0) {
+          notifiedGameIdsRef.current.add(String(game.id));
+        }
+      });
+      isHistoryInitializedRef.current = true;
+      return;
+    }
+
+    const newlyCompletedGame = gameHistory.find((game) => (
+      game.isCompleted &&
+      parseInt(game.rollResult, 10) > 0 &&
+      !notifiedGameIdsRef.current.has(String(game.id))
+    ));
+
+    if (!newlyCompletedGame) return;
+
+    notifiedGameIdsRef.current.add(String(newlyCompletedGame.id));
+    const randomProgressMs = 800 + Math.floor(Math.random() * 1001);
+    if (revealTimerRef.current) {
+      clearTimeout(revealTimerRef.current);
+    }
+    setResultModal({
+      isOpen: true,
+      isRevealing: true,
+      progressMs: randomProgressMs,
+      won: parseFloat(newlyCompletedGame.payout) > 0,
+      gameId: newlyCompletedGame.id,
+      rollResult: newlyCompletedGame.rollResult,
+      payout: newlyCompletedGame.payout
+    });
+
+    revealTimerRef.current = setTimeout(() => {
+      setResultModal((prev) => ({ ...prev, isRevealing: false }));
+      revealTimerRef.current = null;
+    }, randomProgressMs);
+  }, [gameHistory]);
+
+  useEffect(() => () => {
+    if (revealTimerRef.current) {
+      clearTimeout(revealTimerRef.current);
+    }
+  }, []);
+
   const calculatePayout = async () => {
     if (!contract) return;
     try {
@@ -100,6 +237,27 @@ const DiceGame = ({
       }
     } catch (error) {
       console.error('Error loading allowance:', error);
+    }
+  };
+
+  const loadRequestIdMap = async (diceGameContract) => {
+    if (!account || !diceGameContract) return;
+    try {
+      const filter = diceGameContract.filters.GameStarted(null, account);
+      const logs = await diceGameContract.queryFilter(filter);
+      const map = {};
+      logs.forEach((log) => {
+        const gameId = log.args?.gameId?.toString?.();
+        const requestId = log.args?.requestId?.toString?.();
+        if (gameId && requestId) {
+          map[gameId] = requestId;
+        }
+      });
+      if (Object.keys(map).length > 0) {
+        setRequestIdByGameId((prev) => ({ ...prev, ...map }));
+      }
+    } catch (error) {
+      console.warn('Failed to load requestId map:', error);
     }
   };
 
@@ -174,6 +332,8 @@ const DiceGame = ({
     try {
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
       const contractWithSigner = contract.connect(signer);
+      const network = await signer.provider.getNetwork();
+      const isLocalNetwork = Number(network.chainId) === 31337 || Number(network.chainId) === 1337;
 
       const tx = await contractWithSigner.startGame(
         ethers.parseEther(betAmount),
@@ -194,18 +354,33 @@ const DiceGame = ({
 
       if (event) {
         const parsed = contract.interface.parseLog(event);
+        const gameId = parsed.args.gameId?.toString();
         const requestId = parsed.args.requestId;
+        if (gameId && requestId !== undefined) {
+          setRequestIdByGameId((prev) => ({
+            ...prev,
+            [gameId]: requestId.toString()
+          }));
+        }
 
-        // Manually fulfill the random words request
-        // This is a workaround for the local testing environment
-        // In production, this would be done automatically by the Chainlink VRF
-        const vrfCoordinatorAddress = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
-        const vrfCoordinatorAbi = [
-          'function fulfillRandomWords(uint256 requestId) external'
-        ];
-        const vrfCoordinator = new ethers.Contract(vrfCoordinatorAddress, vrfCoordinatorAbi, signer);
-
-        await vrfCoordinator.fulfillRandomWords(requestId);
+        // Manually fulfill only on local hardhat chain.
+        if (isLocalNetwork) {
+          try {
+            const vrfCoordinatorAbi = [
+              'function fulfillRandomWords(uint256 requestId) external'
+            ];
+            const vrfCoordinator = new ethers.Contract(LOCAL_VRF_COORDINATOR, vrfCoordinatorAbi, signer);
+            const fulfillTx = await vrfCoordinator.fulfillRandomWords(requestId);
+            await fulfillTx.wait();
+          } catch (fulfillError) {
+            console.warn('Manual fulfill failed after startGame:', fulfillError);
+            setSuccess('Game started. Waiting for random result...');
+            setFlowStage('confirming');
+            showToast('Game started, waiting for result', 'info');
+            await loadGameHistory(contract);
+            return;
+          }
+        }
       }
 
       setSuccess('Game completed!');
@@ -231,6 +406,20 @@ const DiceGame = ({
   };
 
   const displayedHistory = showAllHistory ? gameHistory : gameHistory.slice(0, 3);
+  const settledGames = gameHistory.filter(
+    (game) => game.isCompleted && parseInt(game.rollResult, 10) > 0
+  );
+  const wonGamesCount = settledGames.filter(
+    (game) => (parseFloat(game.payout) || 0) > 0
+  ).length;
+  const winRate = settledGames.length > 0
+    ? (wonGamesCount / settledGames.length) * 100
+    : 0;
+  const totalNetPnl = settledGames.reduce((sum, game) => {
+    const payout = parseFloat(game.payout) || 0;
+    const bet = parseFloat(game.betAmount) || 0;
+    return sum + (payout - bet);
+  }, 0);
   const getHistoryCategory = (game) => {
     if (!game.isCompleted || parseInt(game.rollResult, 10) === 0) return 'waiting';
     return parseFloat(game.payout) > 0 ? 'won' : 'lost';
@@ -261,15 +450,16 @@ const DiceGame = ({
   );
 
   return (
-    <Card
-      title="Dice Game"
-      icon="🎲"
-      className="game-card dice-card"
-      headerActions={renderHeaderActions()}
-    >
-      {!showAllHistory && (
-        <>
-          <div className="info-box">
+    <>
+      <Card
+        title="Dice Game"
+        icon="🎲"
+      className={`game-card dice-card ${showAllHistory ? 'dice-card-all-history' : ''}`}
+        headerActions={renderHeaderActions()}
+      >
+        {!showAllHistory && (
+          <>
+            <div className="info-box">
             <p><strong>Rules:</strong></p>
             <ul>
               <li>Predict a number between 1 and 100</li>
@@ -280,7 +470,7 @@ const DiceGame = ({
             </ul>
           </div>
 
-          <div className="game-controls">
+            <div className="game-controls">
             <Input
               type="number"
               id="betAmount"
@@ -347,14 +537,14 @@ const DiceGame = ({
             {!account && (
               <p className="connect-prompt">Please connect your wallet to play</p>
             )}
-          </div>
-        </>
-      )}
+            </div>
+          </>
+        )}
 
-      <div className="game-history">
-        {!showAllHistory && <h3>Recent Games</h3>}
-        {showAllHistory && (
-          <div className="history-filter-row">
+      <div className={`game-history ${showAllHistory ? 'game-history-all' : ''}`}>
+          {!showAllHistory && <h3>Recent Games</h3>}
+          {showAllHistory && (
+            <div className="history-filter-row">
             <button
               type="button"
               className={`card-link-btn history-filter-btn ${historyFilter === 'all' ? 'history-filter-active' : ''}`}
@@ -383,17 +573,29 @@ const DiceGame = ({
             >
               Waiting for result...
             </button>
+            </div>
+          )}
+        {showAllHistory && (
+          <div className="payout-info">
+            <StatItem label="Settled Games" value={settledGames.length.toString()} />
+            <StatItem label="Win Rate" value={`${winRate.toFixed(1)}%`} />
+            <p className="ds-stat-item">
+              <strong>Net P/L:</strong>{' '}
+              <StatusTag type={totalNetPnl >= 0 ? 'active' : 'ended'}>
+                {`${totalNetPnl >= 0 ? '+' : ''}${totalNetPnl.toFixed(4)} GT`}
+              </StatusTag>
+            </p>
           </div>
         )}
-        {isLoadingHistory ? (
-          <Skeleton lines={4} />
-        ) : gameHistory.length === 0 ? (
-          <EmptyState
-            title="No games yet"
-            description="Play your first round to see game history."
-          />
-        ) : (
-          <div className="history-list">
+          {isLoadingHistory ? (
+            <Skeleton lines={4} />
+          ) : gameHistory.length === 0 ? (
+            <EmptyState
+              title="No games yet"
+              description="Play your first round to see game history."
+            />
+          ) : (
+            <div className="history-list">
             {filteredHistory.map((game) => (
               <div key={game.id} className="history-item">
                 <p><strong>Game #{Number(game.id) + 1}</strong></p>
@@ -435,10 +637,48 @@ const DiceGame = ({
                 description="Try another filter."
               />
             )}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {resultModal.isOpen && (
+        <div className="ds-result-modal-overlay" role="dialog" aria-modal="true">
+          <div className={`ds-result-modal ${resultModal.won ? 'ds-result-modal-win' : 'ds-result-modal-lose'}`}>
+            {resultModal.isRevealing ? (
+              <>
+                <h3>🎲 Checking Result...</h3>
+                <p>Game #{Number(resultModal.gameId) + 1}</p>
+                <div className="ds-result-progress-track">
+                  <div
+                    className="ds-result-progress-fill"
+                    style={{ animationDuration: `${resultModal.progressMs}ms` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <h3>{resultModal.won ? '🎉 You Won!' : '😢 You Lost'}</h3>
+                <p>Game #{Number(resultModal.gameId) + 1}</p>
+                <p>Roll: {resultModal.rollResult}</p>
+                <p>
+                  {resultModal.won
+                    ? `Payout: ${parseFloat(resultModal.payout).toFixed(4)} GT`
+                    : 'Better luck next round!'}
+                </p>
+                <button
+                  type="button"
+                  className="ds-button ds-button-primary ds-result-modal-btn"
+                  onClick={() => setResultModal((prev) => ({ ...prev, isOpen: false }))}
+                >
+                  Close
+                </button>
+              </>
+            )}
           </div>
-        )}
-      </div>
-    </Card>
+        </div>
+      )}
+    </>
   );
 };
 
