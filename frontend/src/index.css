@@ -816,6 +816,13 @@ code {
   font-weight: 600;
 }
 
+.input-hint {
+  margin-top: -6px;
+  margin-bottom: var(--space-2);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .game-controls {
   display: grid;
   gap: var(--space-3);
@@ -1071,6 +1078,25 @@ code {
 
 .lottery-card {
   overflow: hidden;
+}
+
+.lottery-card:hover,
+.lottery-card:focus-within {
+  overflow-y: auto;
+}
+
+.lottery-card::-webkit-scrollbar {
+  width: 8px;
+}
+
+.lottery-card::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(87, 167, 255, 0.45);
+}
+
+.lottery-card::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
 }
 
 .dice-card {

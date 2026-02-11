@@ -25,7 +25,8 @@ function App() {
   const [contracts, setContracts] = useState({
     gameToken: { address: null, abi: null },
     lottery: { address: null, abi: null },
-    diceGame: { address: null, abi: null }
+    diceGame: { address: null, abi: null },
+    vrfCoordinator: { address: null }
   });
   const [currentRoute, setCurrentRoute] = useState(resolveRoute(window.location.pathname));
 
@@ -65,6 +66,9 @@ function App() {
         diceGame: {
           address: deploymentInfo.contracts.DiceGame,
           abi: require('./contracts/DiceGame.json').abi
+        },
+        vrfCoordinator: {
+          address: deploymentInfo.contracts.VRFCoordinatorV2Mock || null
         }
       });
     } catch (error) {
@@ -106,6 +110,7 @@ function App() {
               abi={contracts.lottery.abi}
               gameTokenAddress={contracts.gameToken.address}
               gameTokenAbi={contracts.gameToken.abi}
+              vrfCoordinatorAddress={contracts.vrfCoordinator.address}
               onToggleView={() => navigateTo('home')}
               toggleLabel="Return"
             />
@@ -124,6 +129,7 @@ function App() {
               abi={contracts.diceGame.abi}
               gameTokenAddress={contracts.gameToken.address}
               gameTokenAbi={contracts.gameToken.abi}
+              vrfCoordinatorAddress={contracts.vrfCoordinator.address}
               onToggleView={() => navigateTo('home')}
               toggleLabel="Return"
             />
@@ -141,6 +147,7 @@ function App() {
             abi={contracts.lottery.abi}
             gameTokenAddress={contracts.gameToken.address}
             gameTokenAbi={contracts.gameToken.abi}
+            vrfCoordinatorAddress={contracts.vrfCoordinator.address}
             onToggleView={() => navigateTo('lottery')}
             toggleLabel="Lottery Game"
           />
@@ -153,6 +160,7 @@ function App() {
             abi={contracts.diceGame.abi}
             gameTokenAddress={contracts.gameToken.address}
             gameTokenAbi={contracts.gameToken.abi}
+            vrfCoordinatorAddress={contracts.vrfCoordinator.address}
             onToggleView={() => navigateTo('dice')}
             toggleLabel="Dice Game"
           />

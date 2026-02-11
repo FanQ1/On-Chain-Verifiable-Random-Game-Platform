@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ethers } from 'ethers';
 import Button from './ui/Button';
 import { InlineError, InlineSuccess } from './ui/InlineStatus';
@@ -9,6 +9,7 @@ import { getFriendlyError } from '../utils/friendlyError';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 
 const WalletHubCard = ({ account, gameTokenAddress, gameTokenAbi }) => {
+  const BALANCE_POLL_INTERVAL_MS = 1500;
   const [tokenBalance, setTokenBalance] = useState('0');
   const [isMinting, setIsMinting] = useState(false);
   const [mintTarget, setMintTarget] = useState('');
@@ -33,22 +34,51 @@ const WalletHubCard = ({ account, gameTokenAddress, gameTokenAbi }) => {
     return new ethers.Contract(gameTokenAddress, gameTokenAbi, provider);
   }, [gameTokenAddress, gameTokenAbi]);
 
-  useEffect(() => {
-    const loadTokenBalance = async () => {
-      if (!account || !gameTokenContract) return;
+  const refreshTokenBalance = useCallback(async (options = {}) => {
+    const silent = options.silent === true;
+    if (!account || !gameTokenContract) return;
+    if (!silent) {
       setLoading(true);
-      try {
-        const balance = await gameTokenContract.balanceOf(account);
-        setTokenBalance(ethers.formatEther(balance.toString()));
-      } catch (e) {
+    }
+    try {
+      const balance = await gameTokenContract.balanceOf(account);
+      setTokenBalance(ethers.formatEther(balance.toString()));
+    } catch (e) {
+      if (!silent) {
         setError('Failed to load GT balance');
-      } finally {
+      }
+    } finally {
+      if (!silent) {
         setLoading(false);
+      }
+    }
+  }, [account, gameTokenContract]);
+
+  useEffect(() => {
+    refreshTokenBalance();
+  }, [refreshTokenBalance]);
+
+  useEffect(() => {
+    if (!account || !gameTokenContract) return undefined;
+
+    const intervalId = setInterval(() => {
+      refreshTokenBalance({ silent: true });
+    }, BALANCE_POLL_INTERVAL_MS);
+
+    const onTransfer = (from, to) => {
+      const accountLower = account.toLowerCase();
+      if (from?.toLowerCase?.() === accountLower || to?.toLowerCase?.() === accountLower) {
+        refreshTokenBalance({ silent: true });
       }
     };
 
-    loadTokenBalance();
-  }, [account, gameTokenContract]);
+    gameTokenContract.on('Transfer', onTransfer);
+
+    return () => {
+      clearInterval(intervalId);
+      gameTokenContract.off('Transfer', onTransfer);
+    };
+  }, [account, gameTokenContract, refreshTokenBalance]);
 
   const handleMintWithEth = async (amount, source = 'tier') => {
     if (!account || !gameTokenContract) return;
@@ -64,8 +94,7 @@ const WalletHubCard = ({ account, gameTokenAddress, gameTokenAbi }) => {
       const fee = ethers.parseEther('0.01');
       const tx = await tokenWithSigner.mintWithEth(mintAmount, { value: fee });
       await tx.wait();
-      const updatedBalance = await gameTokenContract.balanceOf(account);
-      setTokenBalance(ethers.formatEther(updatedBalance.toString()));
+      await refreshTokenBalance({ silent: true });
       setSuccess(`Recharge successful: +${amount} GT`);
       setIsRechargeView(false);
       showToast('Recharge successful', 'success');

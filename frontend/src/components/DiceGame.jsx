@@ -19,12 +19,14 @@ const DiceGame = ({
   abi,
   gameTokenAddress,
   gameTokenAbi,
+  vrfCoordinatorAddress,
   onToggleView,
   toggleLabel = 'Dice Game'
 }) => {
   const LOCAL_VRF_COORDINATOR = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
-  const AUTO_RETRY_INTERVAL_MS = 8000;
-  const [betAmount, setBetAmount] = useState('1');
+  const resolvedVrfCoordinatorAddress = vrfCoordinatorAddress || LOCAL_VRF_COORDINATOR;
+  const AUTO_RETRY_INTERVAL_MS = 2500;
+  const [betAmount, setBetAmount] = useState('5000');
   const [prediction, setPrediction] = useState(50);
   const [potentialPayout, setPotentialPayout] = useState('0');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -46,6 +48,7 @@ const DiceGame = ({
     isOpen: false,
     isRevealing: false,
     progressMs: 1000,
+    sequenceNo: '',
     won: false,
     gameId: '',
     rollResult: '',
@@ -99,7 +102,7 @@ const DiceGame = ({
     if (!hasPendingGame) return undefined;
 
     const intervalId = setInterval(() => {
-      loadGameHistory(contract);
+      loadGameHistory(contract, { silent: true });
     }, 2000);
 
     return () => clearInterval(intervalId);
@@ -137,13 +140,14 @@ const DiceGame = ({
         setIsRetryingFulfill(true);
         setLastFulfillRetryAt(now);
 
-        const signer = await provider.getSigner();
+        const signer = await getLocalAutoFulfillSigner();
+        if (!signer) return;
         const vrfCoordinatorAbi = ['function fulfillRandomWords(uint256 requestId) external'];
-        const vrfCoordinator = new ethers.Contract(LOCAL_VRF_COORDINATOR, vrfCoordinatorAbi, signer);
+        const vrfCoordinator = new ethers.Contract(resolvedVrfCoordinatorAddress, vrfCoordinatorAbi, signer);
         const tx = await vrfCoordinator.fulfillRandomWords(requestId);
         await tx.wait();
 
-        await loadGameHistory(contract);
+        await loadGameHistory(contract, { silent: true });
       } catch (error) {
         console.warn('Auto retry fulfill failed:', error);
       } finally {
@@ -157,6 +161,7 @@ const DiceGame = ({
     account,
     gameHistory,
     requestIdByGameId,
+    resolvedVrfCoordinatorAddress,
     isPlaying,
     isRetryingFulfill,
     lastFulfillRetryAt
@@ -192,6 +197,7 @@ const DiceGame = ({
       isOpen: true,
       isRevealing: true,
       progressMs: randomProgressMs,
+      sequenceNo: newlyCompletedGame.sequenceNo || '',
       won: parseFloat(newlyCompletedGame.payout) > 0,
       gameId: newlyCompletedGame.id,
       rollResult: newlyCompletedGame.rollResult,
@@ -261,16 +267,33 @@ const DiceGame = ({
     }
   };
 
-  const loadGameHistory = async (diceGameContract) => {
+  const getLocalAutoFulfillSigner = async () => {
+    try {
+      const localProvider = new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+      const localNetwork = await localProvider.getNetwork();
+      const isLocalNetwork = Number(localNetwork.chainId) === 31337 || Number(localNetwork.chainId) === 1337;
+      if (!isLocalNetwork) return null;
+      return await localProvider.getSigner(0);
+    } catch (error) {
+      console.warn('Unable to use local auto-fulfill signer:', error);
+      return null;
+    }
+  };
+
+  const loadGameHistory = async (diceGameContract, options = {}) => {
+    const silent = options.silent === true;
     if (!account) return;
-    setIsLoadingHistory(true);
+    if (!silent) {
+      setIsLoadingHistory(true);
+    }
     try {
       const games = await diceGameContract.getPlayerGames(account);
       const gameDetails = await Promise.all(
-        games.map(async (gameId) => {
+        games.map(async (gameId, idx) => {
           const game = await diceGameContract.getGame(gameId);
           return {
             id: gameId.toString(),
+            sequenceNo: (idx + 1).toString(),
             betAmount: ethers.formatEther(game.betAmount.toString()),
             prediction: game.prediction.toString(),
             rollResult: game.rollResult.toString(),
@@ -282,9 +305,13 @@ const DiceGame = ({
       setGameHistory(gameDetails.reverse());
     } catch (error) {
       console.error('Error loading game history:', error);
-      showToast('Failed to load game history', 'error');
+      if (!silent) {
+        showToast('Failed to load game history', 'error');
+      }
     } finally {
-      setIsLoadingHistory(false);
+      if (!silent) {
+        setIsLoadingHistory(false);
+      }
     }
   };
 
@@ -300,8 +327,8 @@ const DiceGame = ({
       const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
       const gameTokenWithSigner = gameTokenContract.connect(signer);
 
-      // Approve a large amount (10000 tokens)
-      const approveAmount = ethers.parseEther('10000');
+      // Approve max uint so users don't need repeated approvals.
+      const approveAmount = ethers.MaxUint256;
       const tx = await gameTokenWithSigner.approve(contractAddress, approveAmount);
       setFlowStage('confirming');
       await tx.wait();
@@ -323,6 +350,43 @@ const DiceGame = ({
 
   const handlePlay = async () => {
     if (!contract || !account) return;
+    const pendingGame = gameHistory.find(
+      (game) => !game.isCompleted || parseInt(game.rollResult, 10) === 0
+    );
+    if (pendingGame) {
+      const message = 'Please wait for your current game result before starting a new round.';
+      setError(message);
+      setFlowStage('error');
+      showToast(message, 'info');
+      return;
+    }
+    if (!gameTokenContract) return;
+
+    try {
+      const requiredBet = ethers.parseEther(betAmount || '0');
+      const [latestAllowance, latestBalance] = await Promise.all([
+        gameTokenContract.allowance(account, contractAddress),
+        gameTokenContract.balanceOf(account)
+      ]);
+      setAllowance(ethers.formatEther(latestAllowance.toString()));
+
+      if (latestAllowance < requiredBet) {
+        const message = 'Allowance is insufficient. Please approve tokens again before playing.';
+        setError(message);
+        setFlowStage('idle');
+        showToast(message, 'info');
+        return;
+      }
+      if (latestBalance < requiredBet) {
+        const message = 'Insufficient GT balance for this bet amount.';
+        setError(message);
+        setFlowStage('error');
+        showToast(message, 'error');
+        return;
+      }
+    } catch (precheckError) {
+      console.warn('Failed to run pre-check before startGame:', precheckError);
+    }
 
     setIsPlaying(true);
     setFlowStage('submitting');
@@ -369,7 +433,15 @@ const DiceGame = ({
             const vrfCoordinatorAbi = [
               'function fulfillRandomWords(uint256 requestId) external'
             ];
-            const vrfCoordinator = new ethers.Contract(LOCAL_VRF_COORDINATOR, vrfCoordinatorAbi, signer);
+            const autoFulfillSigner = await getLocalAutoFulfillSigner();
+            if (!autoFulfillSigner) {
+              throw new Error('Local auto-fulfill signer unavailable');
+            }
+            const vrfCoordinator = new ethers.Contract(
+              resolvedVrfCoordinatorAddress,
+              vrfCoordinatorAbi,
+              autoFulfillSigner
+            );
             const fulfillTx = await vrfCoordinator.fulfillRandomWords(requestId);
             await fulfillTx.wait();
           } catch (fulfillError) {
@@ -377,7 +449,8 @@ const DiceGame = ({
             setSuccess('Game started. Waiting for random result...');
             setFlowStage('confirming');
             showToast('Game started, waiting for result', 'info');
-            await loadGameHistory(contract);
+            await loadGameHistory(contract, { silent: true });
+            await loadAllowance(gameTokenContract);
             return;
           }
         }
@@ -387,6 +460,7 @@ const DiceGame = ({
       setFlowStage('done');
       showToast('Game completed', 'success');
       await loadGameHistory(contract);
+      await loadAllowance(gameTokenContract);
     } catch (error) {
       console.error('Error starting game:', error);
       const message = getFriendlyError(error, 'Failed to start game. Please try again.');
@@ -430,6 +504,9 @@ const DiceGame = ({
       return getHistoryCategory(game) === historyFilter;
     })
     : displayedHistory;
+  const hasPendingGame = gameHistory.some(
+    (game) => !game.isCompleted || parseInt(game.rollResult, 10) === 0
+  );
 
   const renderHeaderActions = () => (
     <>
@@ -475,12 +552,13 @@ const DiceGame = ({
               type="number"
               id="betAmount"
               label="Bet Amount (GT)"
-              min="0.001"
-              max="10"
-              step="0.001"
+              min="5000"
+              max="50000"
+              step="1"
               value={betAmount}
               onChange={(e) => setBetAmount(e.target.value)}
             />
+            <p className="input-hint">Min: 5000 GT, Max: 50000 GT</p>
 
             <div className="input-group">
               <label htmlFor="prediction">Prediction (1-100):</label>
@@ -516,7 +594,17 @@ const DiceGame = ({
               approvalRequired={parseFloat(allowance) < parseFloat(betAmount || '0')}
             />
 
-            {parseFloat(allowance) < parseFloat(betAmount) ? (
+            {hasPendingGame ? (
+              <>
+                <p className="history-meta-item">
+                  <strong>Play Locked:</strong>{' '}
+                  <StatusTag type="info">Waiting for current game result</StatusTag>
+                </p>
+                <Button disabled>
+                  Waiting for Result
+                </Button>
+              </>
+            ) : parseFloat(allowance) < parseFloat(betAmount) ? (
               <Button
                 onClick={handleApprove}
                 disabled={!account || isApproving}
@@ -598,7 +686,7 @@ const DiceGame = ({
             <div className="history-list">
             {filteredHistory.map((game) => (
               <div key={game.id} className="history-item">
-                <p><strong>Game #{Number(game.id) + 1}</strong></p>
+                <p><strong>Game #{game.sequenceNo}</strong></p>
                 <div className="history-status-box">
                   <TransactionStepper
                     stage={getHistoryStage(game)}
@@ -648,7 +736,7 @@ const DiceGame = ({
             {resultModal.isRevealing ? (
               <>
                 <h3>🎲 Checking Result...</h3>
-                <p>Game #{Number(resultModal.gameId) + 1}</p>
+                <p>Game #{resultModal.sequenceNo}</p>
                 <div className="ds-result-progress-track">
                   <div
                     className="ds-result-progress-fill"
@@ -659,7 +747,7 @@ const DiceGame = ({
             ) : (
               <>
                 <h3>{resultModal.won ? '🎉 You Won!' : '😢 You Lost'}</h3>
-                <p>Game #{Number(resultModal.gameId) + 1}</p>
+                <p>Game #{resultModal.sequenceNo}</p>
                 <p>Roll: {resultModal.rollResult}</p>
                 <p>
                   {resultModal.won

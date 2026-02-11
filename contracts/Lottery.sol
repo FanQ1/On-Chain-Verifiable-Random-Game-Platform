@@ -21,10 +21,10 @@ contract Lottery is Ownable, ReentrancyGuard {
 
     // Lottery state
     uint256 public currentLotteryId;
-    uint256 public ticketPrice = 0.01 ether;
+    uint256 public ticketPrice = 2000 ether;
     uint256 public constant HOUSE_EDGE = 5; // 5%
-    uint256 public constant MIN_PLAYERS = 3;
-    uint256 public constant MAX_PLAYERS = 100;
+    uint256 public constant MIN_PLAYERS = 50;
+    uint256 public constant MAX_PLAYERS = 50;
     uint256 public constant DRAW_INTERVAL = 1 days;
 
     struct LotteryInfo {
