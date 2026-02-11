@@ -37,11 +37,18 @@ contract DiceGame is Ownable, ReentrancyGuard {
 
     mapping(uint256 => Game) public games;
     mapping(uint256 => uint256) public requestIdToGameId;
+    mapping(uint256 => bool) public isValidRequestId;
     mapping(address => uint256[]) public playerGames;
 
     uint256 public gameIdCounter;
 
-    event GameStarted(uint256 indexed gameId, address indexed player, uint256 betAmount, uint256 prediction);
+    event GameStarted(
+        uint256 indexed gameId,
+        address indexed player,
+        uint256 betAmount,
+        uint256 prediction,
+        uint256 requestId
+    );
     event GameCompleted(uint256 indexed gameId, address indexed player, uint256 rollResult, uint256 payout);
     event BetLimitsUpdated(uint256 newMinBet, uint256 newMaxBet);
 
@@ -105,8 +112,9 @@ contract DiceGame is Ownable, ReentrancyGuard {
         );
 
         requestIdToGameId[requestId] = gameId;
+        isValidRequestId[requestId] = true;
 
-        emit GameStarted(gameId, msg.sender, betAmount, prediction);
+        emit GameStarted(gameId, msg.sender, betAmount, prediction, requestId);
     }
 
     /**
@@ -117,8 +125,9 @@ contract DiceGame is Ownable, ReentrancyGuard {
     function rawFulfillRandomWords(uint256 requestId, uint256[] memory randomWords) external {
         require(msg.sender == address(vrfCoordinator), "DiceGame: Only VRF coordinator can call");
 
+        require(isValidRequestId[requestId], "DiceGame: Invalid request ID");
         uint256 gameId = requestIdToGameId[requestId];
-        require(gameId != 0, "DiceGame: Invalid request ID");
+        isValidRequestId[requestId] = false;
 
         Game storage game = games[gameId];
         require(!game.isCompleted, "DiceGame: Game already completed");

@@ -66,6 +66,33 @@ describe("DiceGame", function () {
       expect(await diceGame.gameIdCounter()).to.equal(1);
     });
 
+    it("Should emit requestId in GameStarted event", async function () {
+      const { diceGame, gameToken, player1 } = await loadFixture(deployContractsFixture);
+
+      const betAmount = ethers.parseEther("1");
+      const prediction = 50;
+
+      await gameToken.connect(player1).approve(await diceGame.getAddress(), betAmount);
+      const tx = await diceGame.connect(player1).startGame(betAmount, prediction);
+      const receipt = await tx.wait();
+
+      const event = receipt.logs.find((log) => {
+        try {
+          const parsed = diceGame.interface.parseLog(log);
+          return parsed.name === "GameStarted";
+        } catch (error) {
+          return false;
+        }
+      });
+
+      expect(event).to.not.equal(undefined);
+
+      const parsedEvent = diceGame.interface.parseLog(event);
+      expect(parsedEvent.args.gameId).to.equal(0);
+      expect(parsedEvent.args.player).to.equal(player1.address);
+      expect(parsedEvent.args.requestId).to.equal(1);
+    });
+
     it("Should not allow starting game without approval", async function () {
       const { diceGame, player1 } = await loadFixture(deployContractsFixture);
 
@@ -124,6 +151,23 @@ describe("DiceGame", function () {
   });
 
   describe("Game Outcome", function () {
+    it("Should fulfill first game (gameId 0) successfully", async function () {
+      const { diceGame, gameToken, vrfCoordinator, player1 } = await loadFixture(deployContractsFixture);
+
+      const betAmount = ethers.parseEther("1");
+      const prediction = 50;
+
+      await gameToken.connect(player1).approve(await diceGame.getAddress(), betAmount);
+      await diceGame.connect(player1).startGame(betAmount, prediction);
+
+      await expect(vrfCoordinator.fulfillRandomWords(1))
+        .to.emit(diceGame, "GameCompleted");
+
+      const game = await diceGame.getGame(0);
+      expect(game.isCompleted).to.equal(true);
+      expect(game.rollResult).to.be.greaterThan(0);
+    });
+
     it("Should record game correctly", async function () {
       const { diceGame, gameToken, player1 } = await loadFixture(deployContractsFixture);
 

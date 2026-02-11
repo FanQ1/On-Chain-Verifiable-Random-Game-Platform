@@ -194,7 +194,7 @@ const DiceGame = ({
 
       if (event) {
         const parsed = contract.interface.parseLog(event);
-        const gameId = parsed.args.gameId;
+        const requestId = parsed.args.requestId;
 
         // Manually fulfill the random words request
         // This is a workaround for the local testing environment
@@ -205,10 +205,6 @@ const DiceGame = ({
         ];
         const vrfCoordinator = new ethers.Contract(vrfCoordinatorAddress, vrfCoordinatorAbi, signer);
 
-        // The requestId is the gameId + 1 (because requestId starts from 1)
-        // Convert BigInt to number before adding 1
-        const gameIdNumber = typeof gameId === 'bigint' ? Number(gameId) : gameId;
-        const requestId = gameIdNumber + 1;
         await vrfCoordinator.fulfillRandomWords(requestId);
       }
 
@@ -400,7 +396,7 @@ const DiceGame = ({
           <div className="history-list">
             {filteredHistory.map((game) => (
               <div key={game.id} className="history-item">
-                <p><strong>Game #{game.id}</strong></p>
+                <p><strong>Game #{Number(game.id) + 1}</strong></p>
                 <div className="history-status-box">
                   <TransactionStepper
                     stage={getHistoryStage(game)}
