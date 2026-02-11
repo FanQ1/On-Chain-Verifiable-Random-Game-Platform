@@ -391,8 +391,8 @@ const LotteryGame = ({
         const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
         const gameTokenWithSigner = gameTokenContract.connect(signer);
   
-        // Approve a large amount (10000 tokens)
-        const approveAmount = ethers.parseEther('10000');
+        // Approve max uint so users don't need repeated approvals.
+        const approveAmount = ethers.MaxUint256;
         const tx = await gameTokenWithSigner.approve(contractAddress, approveAmount);
         setFlowStage('confirming');
         await tx.wait();
@@ -726,6 +726,7 @@ const LotteryGame = ({
             <StatItem label="End Time" value={lotteryInfo.endTime} />
             <StatItem label="Prize Pool" value={`${parseFloat(lotteryInfo.prizePool).toFixed(2)} GT`} />
             <StatItem label="Ticket Price" value={`${parseFloat(ticketPrice || '0').toFixed(4)} GT`} />
+            <StatItem label="Prize Pool Tickets" value="50" />
             <StatItem label="Total Tickets" value={lotteryInfo.totalTickets} />
             <p className="ds-stat-item"><strong>Draw Status:</strong> <StatusTag type={drawStatus.type}>{drawStatus.text}</StatusTag></p>
             {lotteryInfo.isDrawn && (
@@ -763,13 +764,18 @@ const LotteryGame = ({
                 id="ticketCount"
                 label="Number of Tickets"
                 min="1"
-                max="10"
+                max="49"
                 value={ticketCount}
                 onChange={(e) => {
                   const nextValue = Number.parseInt(e.target.value, 10);
-                  setTicketCount(Number.isFinite(nextValue) && nextValue > 0 ? nextValue : 1);
+                  if (!Number.isFinite(nextValue) || nextValue <= 0) {
+                    setTicketCount(1);
+                    return;
+                  }
+                  setTicketCount(Math.min(nextValue, 49));
                 }}
               />
+              <p className="input-hint">Min: 1 ticket, Max: 49 tickets</p>
               <p className="cost-info">Total Cost: {parseFloat(totalCostGt).toFixed(4)} GT</p>
               {isPurchaseLockedByPendingDraw ? (
                 <Button disabled>
