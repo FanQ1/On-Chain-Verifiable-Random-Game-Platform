@@ -44,3 +44,8 @@ The contracts use `require(condition, "string message")` for reverts. Custom err
 ### Struct and Storage Layout
 
 - **DiceGame.Game** and **Lottery.LotteryInfo** use multiple `uint256` and related types. No explicit struct packing (e.g. uint128, uint96) is applied; all fields are full-width. Packing could reduce storage cost for some fields at the cost of more complex logic and is not implemented here.
+- Dice Game struct has been optimized using field packing. Variables are downsized to fit into fewer storage slots:
+    - timestamp is cast to uint96 to share a slot with player (address).
+    - betAmount is reduced to uint128.
+    - prediction and rollResult are reduced to uint64, allowing them to be packed together with isCompleted (bool) in a single slot.
+    - This reduces the storage footprint of the struct from approximately 7 slots to 4 slots, significantly lowering the gas cost for writing game state (SSTORE operations) during startGame and rawFulfillRandomWords

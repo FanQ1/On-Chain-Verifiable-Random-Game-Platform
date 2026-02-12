@@ -26,13 +26,12 @@ contract DiceGame is Ownable, ReentrancyGuard {
     uint256 public constant HOUSE_EDGE = 3; // 3%
     uint256 public constant DICE_SIDES = 100;
 
-
     struct Game {
-        address player;   
-        uint96 timestamp;  
-        uint128 betAmount;   
-        uint64 prediction;   
-        uint64 rollResult;     
+        address player;       
+        uint96 timestamp;    
+        uint128 betAmount;    
+        uint64 prediction;    
+        uint64 rollResult;   
         bool isCompleted;     
         uint256 payout;       
     }
